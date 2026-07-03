@@ -1,15 +1,29 @@
-export default async function handler(req, res) {
-  // --- NUOVA LOGICA: Se ricevi un test, Kairós risponde ---
-  if (req.body.test === true) {
-     return res.status(200).json({ 
-       reply: "Ehilà! Sono Kairós. Il sistema è online e sto ascoltando." 
-     });
-  }
+import { exec } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
-  // --- LOGICA ESISTENTE: Gestione audio per l'ESP32 ---
-  res.status(200).json({
-    message: "Ricevuto",
-    method: req.method,
-    length: req.headers['content-length']
-  });
+export default async function handler(req, res) {
+    if (req.method === 'POST') {
+        const testoDaDire = "Ciao Alessandro, sono Kairós. Il sistema è online.";
+        const outputFilename = '/tmp/output.mp3';
+
+        // Generazione audio tramite edge-tts
+        exec(`edge-tts --text "${testoDaDire}" --write-media ${outputFilename} --voice it-IT-ElsaNeural`, (error) => {
+            if (error) {
+                return res.status(500).json({ error: "Errore sintesi vocale" });
+            }
+            
+            // Invio file audio come stream
+            const stat = fs.statSync(outputFilename);
+            res.writeHead(200, {
+                'Content-Type': 'audio/mpeg',
+                'Content-Length': stat.size
+            });
+            
+            const readStream = fs.createReadStream(outputFilename);
+            readStream.pipe(res);
+        });
+    } else {
+        res.status(200).send("Kairós API Attiva");
+    }
 }
