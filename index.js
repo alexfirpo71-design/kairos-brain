@@ -1,9 +1,8 @@
-// Codice API completo per Vercel
+// Codice API completo e ottimizzato per Vercel - Progetto Kairós
+
 export const config = {
   api: {
-    bodyParser: {
-      sizeLimit: '1mb', // Necessario per gestire il buffer audio inviato dall'ESP32
-    },
+    bodyParser: false, // Disabilitato per ricevere il flusso binario (octet-stream) grezzo
   },
 };
 
@@ -14,16 +13,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Ricezione del flusso audio (application/octet-stream)
-    const audioBuffer = req.body;
-    console.log("Audio ricevuto da ESP32, dimensione:", audioBuffer ? audioBuffer.length : 0);
+    // Lettura manuale del flusso binario grezzo
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const audioBuffer = Buffer.concat(chunks);
+    
+    console.log("Audio ricevuto da ESP32, dimensione bytes:", audioBuffer.length);
 
     // --- LOGICA DI RISPOSTA ---
-    // Invece di inviare "OK", inviamo l'URL che il main.cpp si aspetta.
-    // Assicurati che l'URL che inserisci qui sia un link pubblico e funzionante.
+    // Questo URL deve iniziare per "http" affinché il main.cpp esegua audio.connecttohost()
     const urlAudioRisposta = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"; 
 
-    // Risposta che soddisfa la condizione payload.startsWith("http") nel tuo main.cpp
+    // Risposta diretta con l'URL per il firmware
     res.status(200).send(urlAudioRisposta);
 
   } catch (error) {
