@@ -1,43 +1,37 @@
+// api/index.js - Versione Corretta per Kairós
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb', // Impostazione per gestire il buffer audio
+    },
+  },
+};
+
 export default async function handler(req, res) {
-  // Log per debug su Vercel
-  console.log("Metodo ricevuto:", req.method);
+  // 1. Verifica che la richiesta sia POST
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-  if (req.method === 'POST') {
-    try {
-      // 1. Qui ricevi l'audio dall'ESP32
-      // Per ora, simuliamo la ricezione per validare il collegamento
-      const audioData = req.body; 
-      console.log("Dati audio ricevuti, dimensione:", audioData ? audioData.length : "vuoto");
+  try {
+    // 2. Ricezione dei dati audio grezzi dall'ESP32
+    const audioBuffer = req.body;
+    console.log("Audio ricevuto, dimensione bytes:", audioBuffer.length);
 
-      // 2. Chiamata a Groq (con la tua API Key salvata nelle variabili ambientali)
-      const rispostaGroq = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.CHIAVE_API_GROQ}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: "llama3-8b-8192",
-          messages: [{ role: "user", content: "Rispondi brevemente e in modo amichevole." }]
-        })
-      });
+    // 3. LOGICA DI ELABORAZIONE
+    // In questa sezione integrerai la tua AI (es. OpenAI Whisper o altro).
+    // Per ora, restituiamo un URL di esempio che inizia per "http".
+    // Questo farà sì che il tuo ESP32 nel main.cpp entri nel blocco "if (payload.startsWith("http"))"
+    
+    const urlRisposta = "https://esempio.com/audio/risposta_vocale.mp3"; 
 
-      const data = await rispostaGroq.json();
-      const rispostaAI = data.choices[0].message.content;
-      console.log("Risposta AI generata:", rispostaAI);
+    // 4. Risposta all'ESP32
+    // Il server deve inviare solo l'URL affinché la funzione .startsWith("http") nel main.cpp abbia successo
+    res.status(200).send(urlRisposta);
 
-      // 3. Risposta all'ESP32
-      // ATTENZIONE: Qui devi restituire l'URL di un file audio (es. un server TTS)
-      // Per il test, inviamo un URL mp3 di prova se la comunicazione funziona
-      const urlAudioTest = "https://files.catbox.moe/o3d9p3.mp3"; 
-      
-      return res.status(200).send(urlAudioTest);
-
-    } catch (error) {
-      console.error("Errore:", error);
-      return res.status(500).send("Errore server");
-    }
-  } else {
-    res.status(405).send("Metodo non permesso");
+  } catch (error) {
+    console.error("Errore elaborazione server:", error);
+    res.status(500).json({ error: 'Errore interno' });
   }
 }
