@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "groq-sdk": "latest",
+    "edge-tts": "latest"
+  }
+}
