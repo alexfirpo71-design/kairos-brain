@@ -1,28 +1,28 @@
-import { Groq } from 'groq-sdk';
-import edge_tts from 'edge-tts'; // Assicurati di avere edge-tts nelle dipendenze
-import { Readable } from 'stream';
+import Groq from 'groq-sdk';
+import { edge_tts } from 'edge-tts';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 export default async function handler(req, res) {
   if (req.method === 'POST') {
     try {
-      // 1. Qui dovresti avere la trascrizione (al momento simuliamo il testo ricevuto)
-      const userText = "Ciao, come stai?"; 
+      // 1. Qui riceveremo il buffer audio, per ora simuliamo il testo come facevi tu
+      const userText = "Ciao, come stai?";
 
       // 2. Chiamata a Groq
       const chatCompletion = await groq.chat.completions.create({
         messages: [{ role: "user", content: userText }],
         model: "llama3-8b-8192",
       });
+
       const responseText = chatCompletion.choices[0].message.content;
 
-      // 3. Sintesi Vocale (TTS) rapida
-      const communicate = new edge_tts.Communicate(responseText, "it-IT-ElsaNeural");
-      
+      // 3. Sintesi vocale (TTS)
       res.setHeader('Content-Type', 'audio/mpeg');
       
-      // Trasmettiamo l'audio direttamente all'ESP32
+      const communicate = new edge_tts.Communicate(responseText, "it-IT-ElsaNeural");
+      
+      // Trasmissione del flusso audio
       const audioStream = await communicate.stream();
       for await (const chunk of audioStream) {
         if (chunk.type === 'audio') {
@@ -32,6 +32,7 @@ export default async function handler(req, res) {
       res.end();
 
     } catch (error) {
+      console.error(error);
       res.status(500).json({ error: error.message });
     }
   } else {
