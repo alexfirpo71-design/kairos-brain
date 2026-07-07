@@ -1,5 +1,5 @@
 import Groq from 'groq-sdk';
-import { edge_tts } from 'edge-tts';
+import edge_tts from 'edge-tts';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
