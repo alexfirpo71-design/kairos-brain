@@ -1,10 +1,17 @@
+import fetch from 'node-fetch';
+
 export default async function handler(req, res) {
   if (req.method === 'POST') {
-    res.setHeader('Content-Type', 'audio/mpeg');
-    // Puntiamo a un file audio di test online (formato mp3)
-    // Questo farà ripartire la riproduzione come faceva l'altro ieri
-    return res.redirect('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
+    try {
+      const response = await fetch('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
+      const buffer = await response.buffer();
+      
+      res.setHeader('Content-Type', 'audio/mpeg');
+      return res.status(200).send(buffer);
+    } catch (error) {
+      return res.status(500).send("Errore nel recupero audio");
+    }
   } else {
-    return res.status(405).send('Metodo non consentito');
+    res.status(405).send('Metodo non consentito');
   }
 }
