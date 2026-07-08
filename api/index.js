@@ -1,14 +1,21 @@
-// Esempio logica per index.js
 export default async function handler(req, res) {
-    if (req.method === 'POST') {
-        // Qui dovresti gestire l'audio in arrivo (req)
-        // ... (logica di invocazione di Edge-TTS o Groq) ...
-        
-        // ESEMPIO: Restituzione di un file audio (devi aver pronto un file .mp3)
-        res.setHeader('Content-Type', 'audio/mpeg');
-        // In un caso reale, qui faresti lo streaming del buffer audio
-        return res.send(audioBuffer); 
-    } else {
-        res.status(405).send('Solo POST consentito');
+  if (req.method === 'POST') {
+    try {
+      // 1. Qui ricevi i dati grezzi inviati dall'ESP32
+      const audioData = req.body; 
+      
+      // NOTA: Per ora, per testare che il server funzioni e non dia errore 500,
+      // restituiamo un buffer vuoto o un messaggio di conferma,
+      // ma senza crashare il server.
+      
+      res.setHeader('Content-Type', 'audio/mpeg');
+      // In futuro qui chiamerai Groq e Edge-TTS
+      return res.status(200).send(Buffer.from([])); 
+    } catch (error) {
+      console.error("Errore nel server:", error);
+      return res.status(500).send("Errore interno");
     }
+  } else {
+    res.status(405).send('Metodo non consentito');
+  }
 }
