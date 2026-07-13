@@ -1,7 +1,7 @@
 const googleTTS = require('google-tts-api');
 
 module.exports = async (req, res) => {
-    if (req.method !== 'POST') return res.status(405).send('Solo POST');
+   // if (req.method !== 'POST') return res.status(405).send('Solo POST');
 
     try {
         const text = "Ciao Alessandro, sono Kairós. Ti ascolto.";
