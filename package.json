@@ -4,6 +4,7 @@
   "main": "api/audio.js",
   "dependencies": {
     "groq-sdk": "^0.3.3",
-    "google-tts-api": "^2.0.2"
+    "google-tts-api": "^2.0.2",
+    "node-fetch": "^2.6.7"
   }
 }
