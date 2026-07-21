@@ -1,8 +1,6 @@
 const googleTTS = require('google-tts-api');
 
 module.exports = async (req, res) => {
-    // if (req.method !== 'POST') return res.status(405).send('Solo POST');
-
     try {
         const text = "Ciao Alessandro, sono Kairós. Ti ascolto.";
 
@@ -13,14 +11,16 @@ module.exports = async (req, res) => {
             host: 'https://translate.google.com',
         });
 
-        // Recupera l'audio dall'URL
+        // Scarica l'MP3 da Google
         const response = await fetch(url);
         const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
 
-        // Inviamo l'audio. Nota: l'ESP32 ora riceverà il buffer 
-        // e lo gestirà direttamente sulla porta I2S.
-        res.setHeader('Content-Type', 'audio/l16'); // Formato PCM grezzo / lineare
-        res.send(Buffer.from(arrayBuffer));
+        // NOTA: Poiché google-tts restituisce un MP3, l'ESP32 ha bisogno 
+        // di un formato raw. Per adesso, inviamo il buffer pulito 
+        // impostando il corretto streaming audio.
+        res.setHeader('Content-Type', 'audio/basic');
+        res.send(buffer);
 
     } catch (error) {
         console.error("ERRORE:", error);
