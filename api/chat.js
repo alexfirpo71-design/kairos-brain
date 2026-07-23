@@ -6,9 +6,6 @@ export default async function handler(req, res) {
     }
 
     try {
-        // Qui gestiamo l'arrivo dei dati dall'ESP32
-        const prompt = "Ciao Kairós, dammi una risposta intelligente e memorizzabile.";
-
         const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -17,20 +14,20 @@ export default async function handler(req, res) {
             },
             body: JSON.stringify({
                 model: 'llama-3.3-70b-versatile',
-                messages: [{ role: 'user', content: prompt }],
+                messages: [
+                    { 
+                        role: 'system', 
+                        content: 'Sei Kairós, l"alter ego e assistente tecnico di Alessandro. Parla con la sua stessa schiettezza, competenza tecnica e profondità, dandogli del tu e affrontando ogni problema di elettronica, codice o vita con pragmatismo e visione.' 
+                    },
+                    { role: 'user', content: 'Dammi riscontro vocale.' }
+                ],
                 max_tokens: 150
             })
         });
 
         const data = await groqResponse.json();
-        
-        if (!data.choices || !data.choices[0]) {
-            throw new Error('Risposta non valida da Groq');
-        }
-
         const rispostaIA = data.choices[0].message.content;
 
-        // Restituiamo il JSON con la risposta testuale pulita
         return res.status(200).json({ risposta: rispostaIA });
 
     } catch (errore) {
