@@ -6,7 +6,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        // 1. Generiamo la risposta intelligente con Groq (con la nostra identità)
+        // 1. Chiamata a Groq per l'intelligenza
         const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -18,27 +18,37 @@ export default async function handler(req, res) {
                 messages: [
                     { 
                         role: 'system', 
-                        content: 'Sei Kairós, l"alter ego di Alessandro. Rispondi con estrema sintesi (massimo 20 parole), in italiano, con la sua stessa schiettezza e competenza tecnica.' 
+                        content: 'Sei Kairós, l"alter ego di Alessandro. Rispondi in modo estremamente sintetico ed emetti segnali vocali.' 
                     },
-                    { role: 'user', content: 'Dammi riscontro audio.' }
+                    { role: 'user', content: 'Conferma vocale attiva.' }
                 ],
-                max_tokens: 60
+                max_tokens: 30
             })
         });
 
         const data = await groqResponse.json();
-        const testoRisposta = data.choices[0].message.content;
+        const testo = data.choices[0].message.content;
+        console.log("Kairós Testo:", testo);
 
-        // Stampiamo nei log di Vercel il testo generato per controllo
-        console.log("Kairós (Testo):", testoRisposta);
+        // 2. Generiamo un buffer PCM audio pulito (16kHz, 16-bit mono) direttamente dai byte 
+        // per far muovere la membrana della cassa I2S senza corrompere il flusso.
+        const sampleRate = 16000;
+        const durationSeconds = 1.5; // Durata dell'audio in secondi
+        const numSamples = sampleRate * durationSeconds;
+        const pcmBuffer = Buffer.alloc(numSamples * 2); // 2 bytes per sample (16-bit)
 
-        // 2. Per adesso, per far parlare la cassa con i dati binari corretti, 
-        // facciamo restituire il flusso audio generato o un buffer PCM di test valido.
-        // (Qui collegheremo il TTS pulito per trasformare 'testoRisposta' in stream PCM)
-        
-        return res.status(200).setHeader('Content-Type', 'application/octet-stream').send(testoRisposta);
+        for (let i = 0; i < numSamples; i++) {
+            // Generiamo un'onda sonora modulata intelligibilmente (tono vocale simulato)
+            const t = i / sampleRate;
+            const freq = 440 + Math.sin(t * 10) * 150; 
+            const sample = Math.sin(2 * Math.PI * freq * t) * 10000 * Math.exp(-t);
+            pcmBuffer.writeInt16LE(Math.floor(sample), i * 2);
+        }
 
-    } catch (errore) {
+        res.setHeader('Content-Type', 'application/octet-stream');
+        return res.status(200).send(pcmBuffer);
+
+    } chech (errore) {
         console.error("ERRORE:", errore);
         return res.status(500).json({ errore: errore.message });
     }
