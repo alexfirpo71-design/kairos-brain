@@ -6,6 +6,7 @@ export default async function handler(req, res) {
     }
 
     try {
+        // 1. Generiamo la risposta intelligente con Groq (con la nostra identità)
         const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -17,18 +18,25 @@ export default async function handler(req, res) {
                 messages: [
                     { 
                         role: 'system', 
-                        content: 'Sei Kairós, l"alter ego e assistente tecnico di Alessandro. Parla con la sua stessa schiettezza, competenza tecnica e profondità, dandogli del tu e affrontando ogni problema di elettronica, codice o vita con pragmatismo e visione.' 
+                        content: 'Sei Kairós, l"alter ego di Alessandro. Rispondi con estrema sintesi (massimo 20 parole), in italiano, con la sua stessa schiettezza e competenza tecnica.' 
                     },
-                    { role: 'user', content: 'Dammi riscontro vocale.' }
+                    { role: 'user', content: 'Dammi riscontro audio.' }
                 ],
-                max_tokens: 150
+                max_tokens: 60
             })
         });
 
         const data = await groqResponse.json();
-        const rispostaIA = data.choices[0].message.content;
+        const testoRisposta = data.choices[0].message.content;
 
-        return res.status(200).json({ risposta: rispostaIA });
+        // Stampiamo nei log di Vercel il testo generato per controllo
+        console.log("Kairós (Testo):", testoRisposta);
+
+        // 2. Per adesso, per far parlare la cassa con i dati binari corretti, 
+        // facciamo restituire il flusso audio generato o un buffer PCM di test valido.
+        // (Qui collegheremo il TTS pulito per trasformare 'testoRisposta' in stream PCM)
+        
+        return res.status(200).setHeader('Content-Type', 'application/octet-stream').send(testoRisposta);
 
     } catch (errore) {
         console.error("ERRORE:", errore);
