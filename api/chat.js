@@ -2,7 +2,7 @@ export default async function handler(req, res) {
     try {
         const apiKey = process.env.GROQ_API_KEY;
         if (!apiKey) {
-            throw new Error("GROQ_API_KEY mancante.");
+            throw new Error("API_KEY mancante nelle variabili d'ambiente di Vercel.");
         }
 
         const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
@@ -10,13 +10,13 @@ export default async function handler(req, res) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 contents: [{
-                    parts: [{ text: "Il sistema Kairós è online. Rispondi con una conferma." }]
+                    parts: [{ text: "Il sistema Kairos e online. Rispondi con una conferma breve." }]
                 }]
             })
         });
 
         const data = await geminiRes.json();
-        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Kairós operativo.";
+        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Kairos operativo.";
 
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(replyText)}&tl=it&client=tw-ob`;
         const ttsResponse = await fetch(ttsUrl, {
