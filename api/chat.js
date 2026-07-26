@@ -10,7 +10,7 @@ export default async function handler(req, res) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 contents: [{
-                    parts: [{ text: "Il sistema Kairós è online. Conferma con una frase breve." }]
+                    parts: [{ text: "Il sistema Kairós è online. Rispondi con una conferma." }]
                 }]
             })
         });
