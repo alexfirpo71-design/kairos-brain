@@ -11,7 +11,6 @@ export default async function handler(req, res) {
             chunks.push(chunk);
         }
         
-        // Risposta fissa di test per isolare l'audio e verificare la cassa senza frastuono
         const aiResponseText = "Kairós è perfettamente online."; 
 
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(aiResponseText)}&tl=it&client=tw-ob`;
@@ -26,12 +25,11 @@ export default async function handler(req, res) {
 
         const audioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
 
-        // Inviamo l'audio pulito
         res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Cache-Control', 'no-cache');
         res.status(200).send(audioBuffer);
 
-    }acha (error) {
+    } catch (error) {
         console.error('Errore:', error);
         res.status(500).json({ error: error.message });
     }
