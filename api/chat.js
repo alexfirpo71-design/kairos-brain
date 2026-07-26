@@ -1,11 +1,4 @@
 import { GoogleGenAI } from '@google/genai';
-import { Buffer } from 'buffer';
-
-export const config = {
-    api: {
-        bodyParser: false,
-    },
-};
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -15,20 +8,13 @@ export default async function handler(req, res) {
     }
 
     try {
-        // Lettura dello stream binario con Promise ed eventi standard
-        const audioBuffer = await new Promise((resolve, reject) => {
-            const chunks = [];
-            req.on('data', (chunk) => chunks.push(chunk));
-            req.on('end', () => resolve(Buffer.concat(chunks)));
-            req.on('error', (err) => reject(err));
-        });
-
+        // Chiamata di test a Gemini senza leggere il body binario per isolare l'errore 500
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: [{ role: 'user', parts: [{ text: "Conferma ricezione audio con una frase breve." }] }],
+            contents: [{ role: 'user', parts: [{ text: "Rispondi solo con: Sistema Kairós operativo e pronto." }] }],
         });
 
-        const replyText = response.text || "Sistema Kairós online.";
+        const replyText = response.text || "Sistema Kairós operativo.";
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(replyText)}&tl=it&client=tw-ob`;
         
         const ttsResponse = await fetch(ttsUrl, {
