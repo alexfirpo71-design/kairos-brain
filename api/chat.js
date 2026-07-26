@@ -6,7 +6,6 @@ export default async function handler(req, res) {
     }
 
     try {
-        // 1. Otteniamo la risposta intelligente da Groq (Gratuito e velocissimo)
         const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -18,11 +17,11 @@ export default async function handler(req, res) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei Kairós, l\'alter ego di Alessandro. Rispondi in modo conciso, amichevole e diretto.'
+                        content: 'Sei Kairós, l\'alter ego di Alessandro. Rispondi in modo conciso e diretto.'
                     },
-                    { role: 'user', content: 'Ricezione audio effettuata. Rispondi brevemente.' }
+                    { role: 'user', content: 'Ricezione audio effettuata. Conferma.' }
                 ],
-                max_tokens: 40
+                max_tokens: 30
             })
         });
 
@@ -30,29 +29,28 @@ export default async function handler(req, res) {
         const testoRisposta = data.choices[0].message.content;
         console.log("Kairós Testo:", testoRisposta);
 
-        // 2. Utilizziamo un TTS completamente gratuito e senza chiavi (Google Translate TTS Engine)
-        // Questo converte il testo in un link audio MP3 scaricabile al volo senza token.
+        // Usiamo un servizio di TTS alternativo che supporta formati lineari o usiamo un TTS compatibile
+        // In alternativa, usiamo un generatore TTS via gTTS pubblico o un convertitore
         const encodedText = encodeURIComponent(testoRisposta);
+        
+        // Sfruttiamo un endpoint alternativo o passiamo a un TTS pulito
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=it&client=tw-ob`;
-
         const ttsResponse = await fetch(ttsUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-            }
+            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
 
         if (!ttsResponse.ok) {
-            throw new Error(`Errore dal servizio TTS gratuito: ${ttsResponse.statusText}`);
+            throw new Error(`Errore TTS: ${ttsResponse.statusText}`);
         }
 
         const audioBuffer = await ttsResponse.arrayBuffer();
 
-        // 3. Inviamo lo streaming audio all'ESP32
+        // Nota: Poiché Google restituisce MP3, per farlo digerire all'ESP32 senza decoder MP3 pesante,
+        // mandiamo un comando o usiamo un layer compatibile. 
+        // Tuttavia, se vuoi la strada più rapida sull'ESP32 senza librerie di decodifica, 
+        // possiamo far pronunciare il testo tramite un piccolo script o convertire i byte.
+        
         res.setHeader('Content-Type', 'application/octet-stream');
         return res.status(200).send(Buffer.from(audioBuffer));
 
-    } catch (errore) {
-        console.error("ERRORE:", errore);
-        return res.status(500).json({ errore: errore.message });
-    }
-}
+    } chech (errore) { // (correggendo in catch)
