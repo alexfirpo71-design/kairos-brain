@@ -1,17 +1,21 @@
 import { GoogleGenAI } from '@google/genai';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
     try {
-        // Chiamata di test a Gemini senza leggere il body binario per isolare l'errore 500
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            throw new Error("GEMINI_API_KEY non configurata nelle variabili d'ambiente di Vercel.");
+        }
+
+        const ai = new GoogleGenAI({ apiKey: apiKey });
+
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: [{ role: 'user', parts: [{ text: "Rispondi solo con: Sistema Kairós operativo e pronto." }] }],
+            contents: [{ role: 'user', parts: [{ text: "Rispondi solo con: Sistema Kairós operativo." }] }],
         });
 
         const replyText = response.text || "Sistema Kairós operativo.";
@@ -31,7 +35,7 @@ export default async function handler(req, res) {
         return res.status(200).send(ttsAudioBuffer);
 
     } catch (error) {
-        console.error("Errore server:", error);
+        console.error("Dettaglio errore server:", error.message);
         return res.status(500).json({ error: error.message });
     }
 }
