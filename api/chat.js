@@ -1,36 +1,26 @@
 export default async function handler(req, res) {
     try {
-        const apiKey = process.env.GROQ_API_KEY;
-        if (!apiKey) {
-            throw new Error("API_KEY mancante nelle variabili d'ambiente di Vercel.");
+        // Generiamo un semplice tono audio sinusoidale pulito (PCM grezzo 16-bit mono a 8kHz)
+        // In questo modo l'ESP32 lo suona direttamente senza fare "pernacchie" o richiedere decoder MP3.
+        const sampleRate = 8000;
+        const durationSeconds = 1.5; // Durata del tono: 1.5 secondi
+        const frequency = 440; // Frequenza del tono (La4)
+        const numSamples = sampleRate * durationSeconds;
+        
+        const buffer = Buffer.alloc(numSamples * 2); // 2 bytes per sample (16-bit)
+        
+        for (let i = 0; i < numSamples; i++) {
+            const t = i / sampleRate;
+            // Onda sinusoidale
+            const sample = Math.sin(2 * Math.PI * frequency * t);
+            // Converti in intero a 16 bit con segno (-32768 a 32767)
+            const intSample = Math.floor(sample * 16383); 
+            buffer.writeInt16LE(intSample, i * 2);
         }
 
-        const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{
-                    parts: [{ text: "Il sistema Kairos e online. Rispondi con una conferma breve." }]
-                }]
-            })
-        });
-
-        const data = await geminiRes.json();
-        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Kairos operativo.";
-
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(replyText)}&tl=it&client=tw-ob`;
-        const ttsResponse = await fetch(ttsUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-
-        if (!ttsResponse.ok) {
-            throw new Error(`Errore TTS: ${ttsResponse.status}`);
-        }
-
-        const ttsAudioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
-
-        res.setHeader('Content-Type', 'audio/mpeg');
-        return res.status(200).send(ttsAudioBuffer);
+        // Restituiamo il flusso PCM grezzo con intestazione corretta
+        res.setHeader('Content-Type', 'audio/l16; rate=8000');
+        return res.status(200).send(buffer);
 
     } catch (error) {
         console.error("Errore critico:", error.message);
