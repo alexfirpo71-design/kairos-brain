@@ -15,12 +15,13 @@ export default async function handler(req, res) {
     }
 
     try {
-        // Raccolta sicura dello stream della richiesta
-        const buffers = [];
-        for await (const chunk of req) {
-            buffers.push(chunk);
-        }
-        const totalBuffer = Buffer.concat(buffers);
+        // Lettura dello stream binario con Promise ed eventi standard
+        const audioBuffer = await new Promise((resolve, reject) => {
+            const chunks = [];
+            req.on('data', (chunk) => chunks.push(chunk));
+            req.on('end', () => resolve(Buffer.concat(chunks)));
+            req.on('error', (err) => reject(err));
+        });
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
