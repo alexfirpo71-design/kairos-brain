@@ -15,15 +15,16 @@ export default async function handler(req, res) {
     }
 
     try {
-        // Consumiamo lo stream della richiesta per sicurezza
-        const chunks = [];
+        // Raccolta sicura dello stream della richiesta
+        const buffers = [];
         for await (const chunk of req) {
-            chunks.push(chunk);
+            buffers.push(chunk);
         }
+        const totalBuffer = Buffer.concat(buffers);
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: [{ role: 'user', parts: [{ text: "Dammi una risposta di conferma operativa in italiano, breve e sintetica." }] }],
+            contents: [{ role: 'user', parts: [{ text: "Conferma ricezione audio con una frase breve." }] }],
         });
 
         const replyText = response.text || "Sistema Kairós online.";
@@ -33,12 +34,17 @@ export default async function handler(req, res) {
             headers: { 'User-Agent': 'Mozilla/5.0' }
         });
 
+        if (!ttsResponse.ok) {
+            throw new Error(`Errore TTS esterno: ${ttsResponse.status}`);
+        }
+
         const ttsAudioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
 
         res.setHeader('Content-Type', 'audio/mpeg');
         return res.status(200).send(ttsAudioBuffer);
 
     } catch (error) {
+        console.error("Errore server:", error);
         return res.status(500).json({ error: error.message });
     }
 }
