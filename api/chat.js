@@ -32,7 +32,7 @@ export default async function handler(req, res) {
         res.setHeader('Content-Type', 'audio/mpeg');
         return res.status(200).send(ttsAudioBuffer);
 
-    }なか catch (error) {
+    } catch (error) {
         console.error("Errore critico:", error.message);
         return res.status(500).json({ error: error.message });
     }
