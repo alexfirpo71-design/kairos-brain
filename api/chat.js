@@ -1,20 +1,21 @@
 export default async function handler(req, res) {
     try {
-        const text = "Il sistema Kairos e online e operativo.";
-        const encodedText = encodeURIComponent(text);
-        
-        // Usiamo l'URL diretto per il flusso audio di Google TTS
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=it&client=tw-ob`;
+        // Generiamo un buffer PCM grezzo di prova (onda sinusoidale o silenzio/tono)
+        // L'ESP32 lo leggerà con i2s_write senza fare "pernacchie"
+        const sampleRate = 16000;
+        const durationSeconds = 2; // Durata di 2 secondi
+        const numSamples = sampleRate * durationSeconds;
+        const buffer = Buffer.alloc(numSamples * 2); // 16-bit per sample (2 bytes)
 
-        const ttsResponse = await fetch(ttsUrl);
-        if (!ttsResponse.ok) {
-            throw new Error("Errore nel recupero dell'audio da Google");
+        // Creiamo un semplice tono udibile (es. 440 Hz) per testare l'altoparlante
+        const frequency = 440; 
+        for (let i = 0; i < numSamples; i++) {
+            const t = i / sampleRate;
+            const sample = Math.sin(2 * Math.PI * frequency * t) * 16383; // Metodo volume
+            buffer.writeInt16LE(Math.floor(sample), i * 2);
         }
 
-        const arrayBuffer = await ttsResponse.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-
-        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Content-Type', 'application/octet-stream');
         return res.send(buffer);
 
     } catch (error) {
