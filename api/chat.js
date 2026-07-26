@@ -1,56 +1,50 @@
-import fetch from 'node-fetch';
+import { Buffer } from 'buffer';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
-        return res.status(405).send('Solo POST');
+        return res.status(405).json({ error: 'Method not allowed' });
     }
 
     try {
-        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile',
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'Sei Kairós, l\'alter ego di Alessandro. Rispondi in modo conciso e diretto.'
-                    },
-                    { role: 'user', content: 'Ricezione audio effettuata. Conferma.' }
-                ],
-                max_tokens: 30
-            })
-        });
+        // 1. Legge il flusso PCM grezzo inviato dall'ESP32
+        const chunks = [];
+        for await (const chunk of req) {
+            chunks.push(chunk);
+        }
+        const audioBuffer = Buffer.concat(chunks);
 
-        const data = await groqResponse.json();
-        const testoRisposta = data.choices[0].message.content;
-        console.log("Kairós Testo:", testoRisposta);
+        if (audioBuffer.length === 0) {
+            return res.status(400).json({ error: 'Audio vuoto ricevuto' });
+        }
 
-        // Usiamo un servizio di TTS alternativo che supporta formati lineari o usiamo un TTS compatibile
-        // In alternativa, usiamo un generatore TTS via gTTS pubblico o un convertitore
-        const encodedText = encodeURIComponent(testoRisposta);
+        // --- Qui inserisci la tua logica di elaborazione (es. chiamata a Groq / OpenAI) ---
+        // Ottieni il testo della risposta testuale del modello IA.
+        // Esempio: const aiResponseText = "Ciao Alessandro, Kairós è operativo.";
+        const aiResponseText = "Kairós online e operativo."; 
+
+        // 2. Chiamata al TTS di Google Translate (o altro motore) per generare l'audio parlato
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(aiResponseText)}&tl=it&client=tw-ob`;
         
-        // Sfruttiamo un endpoint alternativo o passiamo a un TTS pulito
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=it&client=tw-ob`;
         const ttsResponse = await fetch(ttsUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            }
         });
 
         if (!ttsResponse.ok) {
-            throw new Error(`Errore TTS: ${ttsResponse.statusText}`);
+            throw new Error(`Errore dal servizio TTS: ${ttsResponse.statusText}`);
         }
 
-        const audioBuffer = await ttsResponse.arrayBuffer();
+        const mp3Buffer = Buffer.from(await ttsResponse.arrayBuffer());
 
-        // Nota: Poiché Google restituisce MP3, per farlo digerire all'ESP32 senza decoder MP3 pesante,
-        // mandiamo un comando o usiamo un layer compatibile. 
-        // Tuttavia, se vuoi la strada più rapida sull'ESP32 senza librerie di decodifica, 
-        // possiamo far pronunciare il testo tramite un piccolo script o convertire i byte.
-        
+        // 3. Invio dell'audio pulito in formato raw/stream direttamente all'ESP32
+        // Impostiamo gli header corretti per un flusso binario continuo
         res.setHeader('Content-Type', 'application/octet-stream');
-        return res.status(200).send(Buffer.from(audioBuffer));
+        res.setHeader('Cache-Control', 'no-cache');
+        res.status(200).send(mp3Buffer);
 
-    } chech (errore) { // (correggendo in catch)
+    } catch (error) {
+        console.error('Errore nel server Kairós:', error);
+        res.status(500).json({ error: error.message });
+    }
+}
