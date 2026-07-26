@@ -1,24 +1,24 @@
 export default async function handler(req, res) {
     try {
-        // Generiamo un semplice tono audio sinusoidale pulito (PCM grezzo 16-bit mono a 8kHz)
-        // In questo modo l'ESP32 lo suona direttamente senza fare "pernacchie" o richiedere decoder MP3.
         const sampleRate = 8000;
-        const durationSeconds = 1.5; // Durata del tono: 1.5 secondi
-        const frequency = 440; // Frequenza del tono (La4)
+        const durationSeconds = 1.0; 
+        const frequency = 600; // Frequenza leggermente più alta e pulita
         const numSamples = sampleRate * durationSeconds;
         
-        const buffer = Buffer.alloc(numSamples * 2); // 2 bytes per sample (16-bit)
+        const buffer = Buffer.alloc(numSamples * 2);
         
         for (let i = 0; i < numSamples; i++) {
             const t = i / sampleRate;
-            // Onda sinusoidale
-            const sample = Math.sin(2 * Math.PI * frequency * t);
-            // Converti in intero a 16 bit con segno (-32768 a 32767)
-            const intSample = Math.floor(sample * 16383); 
+            // Applichiamo un inviluppo (fade-in / fade-out) per evitare il "click" iniziale e finale
+            let envelope = 1.0;
+            if (t < 0.1) envelope = t / 0.1;
+            if (t > durationSeconds - 0.1) envelope = (durationSeconds - t) / 0.1;
+
+            const sample = Math.sin(2 * Math.PI * frequency * t) * envelope;
+            const intSample = Math.floor(sample * 10000); // Volume ridotto per evitare distorsioni
             buffer.writeInt16LE(intSample, i * 2);
         }
 
-        // Restituiamo il flusso PCM grezzo con intestazione corretta
         res.setHeader('Content-Type', 'audio/l16; rate=8000');
         return res.status(200).send(buffer);
 
