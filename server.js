@@ -26,10 +26,9 @@ wss.on('connection', (ws, req) => {
         if (data.state === 'processing') {
           console.log(`[WS] Elaborazione audio completata. Totale chunk ricevuti: ${audioBuffer.length}`);
           
-          // Qui puoi inserire la chiamata alle API di Groq o elaborare il buffer audio.
-          // Per adesso inviamo una risposta di test valida per chiudere il ciclo e sbloccare l'ESP32.
+          // Inseriamo il campo "action" atteso dal firmware dell'ESP32
           const responsePayload = JSON.stringify({
-            type: 'tts',
+            action: 'speak',
             state: 'idle',
             text: 'Audio ricevuto con successo dal server Kairós!'
           });
