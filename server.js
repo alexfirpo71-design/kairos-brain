@@ -12,23 +12,29 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 // Funzione per generare l'intestazione WAV per i dati PCM grezzi dell'ESP32
 function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSample = 16) {
-    const header = Buffer.allocate(44);
     const dataLength = audioBuffer.length;
     const fileLength = dataLength + 36;
 
-    header.write('RIFF', 0);
-    header.writeUInt32LE(fileLength, 4);
-    header.write('WAVE', 8);
-    header.write('fmt ', 12);
-    header.writeUInt32LE(16, 16); // SubChunk1Size (16 per PCM)
-    header.writeUInt16LE(1, 20);  // AudioFormat (1 per PCM)
-    header.writeUInt16LE(channels, 22);
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE(sampleRate * channels * (bitsPerSample / 8), 28); // ByteRate
-    header.writeUInt16LE(channels * (bitsPerSample / 8), 32); // BlockAlign
-    header.writeUInt16LE(bitsPerSample, 34);
-    header.write('data', 36);
-    header.writeUInt32LE(dataLength, 40);
+    const header = Buffer.from([
+        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
+        0x57, 0x41, 0x56, 0x45, // "WAVE"
+        0x66, 0x6d, 0x74, 0x20, // "fmt "
+        16, 0, 0, 0,            // SubChunk1Size (16 for PCM)
+        1, 0,                   // AudioFormat (1 for PCM)
+        channels, 0,            // NumChannels
+        sampleRate & 0xff, (sampleRate >> 8) & 0xff, (sampleRate >> 16) & 0xff, (sampleRate >> 24) & 0xff,
+        (sampleRate * channels * (bitsPerSample / 8)) & 0xff, 
+        ((sampleRate * channels * (bitsPerSample / 8)) >> 8) & 0xff, 
+        ((sampleRate * channels * (bitsPerSample / 8)) >> 16) & 0xff, 
+        ((sampleRate * channels * (bitsPerSample / 8)) >> 24) & 0xff,
+        0, 0,                   // BlockAlign placeholder
+        bitsPerSample, 0,       // BitsPerSample
+        0x64, 0x61, 0x74, 0x61, // "data"
+        dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
+    ]);
+
+    header.writeUInt16LE(channels * (bitsPerSample / 8), 32);
 
     return Buffer.concat([header, audioBuffer]);
 }
@@ -40,7 +46,6 @@ async function transcribeAudio(audioBuffer) {
         throw new Error("GROQ_API_KEY non configurata nelle variabili d'ambiente di Render.");
     }
 
-    // Aggiungiamo l'intestazione WAV ai dati grezzi ricevuti dall'ESP32
     const wavBuffer = addWavHeader(audioBuffer);
 
     const formData = new FormData();
@@ -119,13 +124,11 @@ wss.on('connection', (ws, req) => {
 
                     let replyText = "Ricevuto.";
                     try {
-                        // 1. Trascriviamo l'audio con Whisper
                         console.log("[Groq] Invio audio a Whisper...");
                         const transcript = await transcribeAudio(completeAudioBuffer);
                         console.log(`[Groq] Trascrizione: "${transcript}"`);
 
                         if (transcript && transcript.trim().length > 0) {
-                            // 2. Chiediamo la risposta all'LLM
                             console.log("[Groq] Generazione risposta LLM...");
                             replyText = await getGroqChatResponse(transcript);
                             console.log(`[Groq] Risposta LLM: "${replyText}"`);
@@ -137,7 +140,6 @@ wss.on('connection', (ws, req) => {
                         replyText = "Errore di elaborazione sul server Kairós.";
                     }
 
-                    // Inviamo la risposta testuale all'ESP32
                     const responsePayload = JSON.stringify({
                         action: 'speak',
                         state: 'idle',
