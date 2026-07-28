@@ -2,6 +2,7 @@
   "name": "kairos-gateway",
   "version": "1.0.0",
   "description": "Gateway WebSocket per Kairos",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
