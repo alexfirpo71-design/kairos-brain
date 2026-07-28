@@ -6,22 +6,22 @@ const server = createServer((req, res) => {
   res.end('Kairos Brain Server is running!\n');
 });
 
-const wss = new WebSocketServer({ server });
+// Creazione del WebSocket Server agganciato specificamente al path /ws
+const wss = new WebSocketServer({ server, path: '/ws' });
 
 wss.on('connection', (ws, req) => {
-  console.log(`[WS] Nuovo dispositivo ESP32 connesso dall'IP: ${req.socket.remoteAddress}`);
+  console.log(`[WS] Dispositivo ESP32 connesso con successo da: ${req.socket.remoteAddress}`);
 
   ws.on('message', (message) => {
-    console.log('[WS] Ricevuto pacchetto dall ESP32');
-    // Qui in seguito integreremo la gestione dei dati audio e di Groq
+    console.log('[WS] Ricevuto pacchetto audio/dati dall ESP32');
   });
 
   ws.on('close', (code, reason) => {
-    console.log(`[WS] Dispositivo disconnesso. Codice: ${code}, Motivo: ${reason.toString()}`);
+    console.log(`[WS] Disconnesso. Codice: ${code}, Motivo: ${reason.toString()}`);
   });
 
   ws.on('error', (error) => {
-    console.error('[WS] Errore sulla connessione:', error);
+    console.error('[WS] Errore:', error);
   });
 });
 
