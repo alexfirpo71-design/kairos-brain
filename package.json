@@ -8,6 +8,8 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "form-data": "^4.0.0",
+    "node-fetch": "^3.3.2",
     "ws": "^8.18.0"
   }
 }
