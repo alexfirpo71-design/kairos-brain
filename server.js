@@ -8,16 +8,20 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server });
 
-wss.on('connection', (ws) => {
-  console.log('Nuovo dispositivo ESP32 connesso via WebSocket.');
+wss.on('connection', (ws, req) => {
+  console.log(`[WS] Nuovo dispositivo ESP32 connesso dall'IP: ${req.socket.remoteAddress}`);
 
   ws.on('message', (message) => {
-    // Qui gestisci i pacchetti binari audio e l'interazione con Groq
-    console.log('Ricevuto messaggio dall ESP32');
+    console.log('[WS] Ricevuto pacchetto dall ESP32');
+    // Qui in seguito integreremo la gestione dei dati audio e di Groq
   });
 
-  ws.on('close', () => {
-    console.log('Dispositivo disconnesso.');
+  ws.on('close', (code, reason) => {
+    console.log(`[WS] Dispositivo disconnesso. Codice: ${code}, Motivo: ${reason.toString()}`);
+  });
+
+  ws.on('error', (error) => {
+    console.error('[WS] Errore sulla connessione:', error);
   });
 });
 
