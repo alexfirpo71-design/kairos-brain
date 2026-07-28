@@ -1,3 +1,4 @@
+import gTTS from 'gtts';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import fetch from 'node-fetch';
