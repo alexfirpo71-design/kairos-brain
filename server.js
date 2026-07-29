@@ -25,9 +25,9 @@ function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSamp
         1, 0,                   // AudioFormat (1 for PCM)
         channels, 0,            // NumChannels
         sampleRate & 0xff, (sampleRate >> 8) & 0xff, (sampleRate >> 16) & 0xff, (sampleRate >> 24) & 0xff,
-        (sampleRate * channels * (bitsPerSample / 8)) & 0xff, 
-        ((sampleRate * channels * (bitsPerSample / 8)) >> 8) & 0xff, 
-        ((sampleRate * channels * (bitsPerSample / 8)) >> 16) & 0xff, 
+        (sampleRate * channels * (bitsPerSample / 8)) & 0xff,
+        ((sampleRate * channels * (bitsPerSample / 8)) >> 8) & 0xff,
+        ((sampleRate * channels * (bitsPerSample / 8)) >> 16) & 0xff,
         ((sampleRate * channels * (bitsPerSample / 8)) >> 24) & 0xff,
         0, 0,                   // BlockAlign placeholder
         bitsPerSample, 0,       // BitsPerSample
@@ -124,8 +124,9 @@ wss.on('connection', (ws, req) => {
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
 
                     let replyText = "Ricevuto.";
+
                     try {
-                        console.log("[Groq] Invio audio a Whisper...");
+                        console.log("[Groq] Invia audio a Whisper...");
                         const transcript = await transcribeAudio(completeAudioBuffer);
                         console.log(`[Groq] Trascrizione: "${transcript}"`);
 
@@ -147,7 +148,25 @@ wss.on('connection', (ws, req) => {
                         text: replyText
                     });
 
+                    // 1. Invia il pacchetto JSON con il testo all'ESP32
                     ws.send(responsePayload);
+
+                    // 2. Genera e invia il flusso audio binario tramite gTTS
+                    const gtts = new gTTS(replyText, 'it');
+                    const chunks = [];
+
+                    gtts.getAudioStream()
+                        .on('data', (chunk) => {
+                            chunks.push(chunk);
+                        })
+                        .on('end', () => {
+                            const audioBufferBinary = Buffer.concat(chunks);
+                            ws.send(audioBufferBinary); // Invia i byte audio direttamente all'ESP32
+                        })
+                        .on('error', (err) => {
+                            console.error("[TTS] Errore durante la generazione audio:", err);
+                        });
+
                     audioBuffer = [];
                 }
             } catch (e) {
