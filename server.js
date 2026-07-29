@@ -101,7 +101,7 @@ async function getGroqChatResponse(userText) {
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [
-                { role: 'system', content: 'Sei Kairós, un assistente IA vocale conciso, amichevole e utile.' },
+                { role: 'system', content: 'Sei Kairós, un assistente IA vocale integrato in un dispositivo hardware con speaker. Rispondi sempre in modo estremamente conciso, naturale e adatto a essere letto ad alta voce, senza mai dire di essere solo un assistente testuale.' },
                 { role: 'user', content: userText }
             ],
             max_tokens: 150
