@@ -1,4 +1,3 @@
-import gTTS from 'gtts';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import fetch from 'node-fetch';
@@ -38,6 +37,20 @@ function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSamp
     header.writeUInt16LE(channels * (bitsPerSample / 8), 32);
 
     return Buffer.concat([header, audioBuffer]);
+}
+
+// Funzione per generare un tono PCM grezzo di test (onda sinusoidale o bip)
+function generatePcmBeep(durationMs = 1500, sampleRate = 16000) {
+    const numSamples = (sampleRate * durationMs) / 1000;
+    const buffer = Buffer.alloc(numSamples * 2); // 16-bit PCM = 2 bytes per sample
+    const frequency = 440; // Nota La (440 Hz)
+
+    for (let i = 0; i < numSamples; i++) {
+        const t = i / sampleRate;
+        const sample = Math.sin(2 * Math.PI * frequency * t) * 10000; // Ampiezza
+        buffer.writeInt16LE(Math.round(sample), i * 2);
+    }
+    return buffer;
 }
 
 // Funzione per inviare l'audio a Groq Whisper API
@@ -151,21 +164,9 @@ wss.on('connection', (ws, req) => {
                     // 1. Invia il pacchetto JSON con il testo all'ESP32
                     ws.send(responsePayload);
 
-                    // 2. Genera e invia il flusso audio binario tramite gTTS
-                    const gtts = new gTTS(replyText, 'it');
-                    const chunks = [];
-
-                    gtts.getAudioStream()
-                        .on('data', (chunk) => {
-                            chunks.push(chunk);
-                        })
-                        .on('end', () => {
-                            const audioBufferBinary = Buffer.concat(chunks);
-                            ws.send(audioBufferBinary); // Invia i byte audio direttamente all'ESP32
-                        })
-                        .on('error', (err) => {
-                            console.error("[TTS] Errore durante la generazione audio:", err);
-                        });
+                    // 2. Invia direttamente i dati audio PCM binari compatibili con l'I2S dell'ESP32
+                    const pcmAudioBuffer = generatePcmBeep(2000); // Genera 2 secondi di audio PCM pulito
+                    ws.send(pcmAudioBuffer);
 
                     audioBuffer = [];
                 }
