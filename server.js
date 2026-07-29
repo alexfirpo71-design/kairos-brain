@@ -47,7 +47,7 @@ function generatePcmBeep(durationMs = 1500, sampleRate = 16000) {
 
     for (let i = 0; i < numSamples; i++) {
         const t = i / sampleRate;
-        const sample = Math.sin(2 * Math.PI * frequency * t) * 10000; // Ampiezza
+        const sample = Math.sin(2 * Math.PI * frequency * t) * 10000;
         buffer.writeInt16LE(Math.round(sample), i * 2);
     }
     return buffer;
@@ -161,12 +161,15 @@ wss.on('connection', (ws, req) => {
                         text: replyText
                     });
 
-                    // 1. Invia il pacchetto JSON con il testo all'ESP32
+                    // 1. Invia prima il pacchetto JSON con il testo
                     ws.send(responsePayload);
 
-                    // 2. Invia direttamente i dati audio PCM binari compatibili con l'I2S dell'ESP32
-                    const pcmAudioBuffer = generatePcmBeep(2000); // Genera 2 secondi di audio PCM pulito
-                    ws.send(pcmAudioBuffer);
+                    // 2. Invia l'audio binario con un ritardo per permettere all'ESP32 di gestirli in sequenza
+                    setTimeout(() => {
+                        const pcmAudioBuffer = generatePcmBeep(2000);
+                        ws.send(pcmAudioBuffer);
+                        console.log("[WS] Inviati byte audio binari all'ESP32.");
+                    }, 100);
 
                     audioBuffer = [];
                 }
