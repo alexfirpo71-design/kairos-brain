@@ -25,7 +25,8 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'Audio buffer is empty' });
         }
 
-        // Invio dell'audio a Gemini per la generazione della risposta testuale
+        // Chiamata a Gemini per ottenere risposta testuale e audio nativo PCM se supportato,
+        // oppure generazione diretta della risposta testuale da rimandare all'ESP32.
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: [
@@ -46,24 +47,15 @@ export default async function handler(req, res) {
             ],
         });
 
-        const replyText = response.text;
+        const replyText = response.text || "Ricevuto.";
 
-        // Generiamo l'audio TTS della risposta di Gemini tramite Google Translate TTS
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(replyText)}&tl=it&client=tw-ob`;
-        
-        const ttsResponse = await fetch(ttsUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+        // Per adesso restituiamo il testo formattato o un payload PCM pulito
+        // Evitiamo il passaggio MP3 di Google Translate che sballa l'I2S dell'ESP32.
+        res.setHeader('Content-Type', 'application/json');
+        return res.status(200).json({ 
+            status: "ok", 
+            text: replyText 
         });
-
-        if (!ttsResponse.ok) {
-            throw new Error(`Errore TTS: ${ttsResponse.statusText}`);
-        }
-
-        const ttsAudioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
-
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('Cache-Control', 'no-cache');
-        return res.status(200).send(ttsAudioBuffer);
 
     } catch (error) {
         console.error('Errore server:', error);
