@@ -167,7 +167,7 @@ async function getGroqChatResponse(conversationHistory, userName = "Alessandro")
 wss.on('connection', (ws, req) => {
     console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.userName = "Alessandro";
-    ws.conversationHistory = []; // Memoria contestuale della sessione
+    ws.conversationHistory = [];
     let audioBuffer = [];
 
     const pingInterval = setInterval(() => {
@@ -182,7 +182,6 @@ wss.on('connection', (ws, req) => {
             try {
                 const data = JSON.parse(message.toString());
                 
-                // Aggiorna nome utente se inviato dal dispositivo
                 if (data.user) {
                     ws.userName = data.user;
                 }
@@ -201,17 +200,13 @@ wss.on('connection', (ws, req) => {
                         console.log(`[Whisper] Trascritto: "${transcript}"`);
                         
                         if (transcript && transcript.trim().length > 0) {
-                            // Aggiunge la domanda dell'utente alla cronologia
                             ws.conversationHistory.push({ role: 'user', content: transcript });
 
-                            // Ottiene la risposta passando l'intera cronologia
                             replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
                             console.log(`[Llama] Risposta: "${replyText}"`);
 
-                            // Aggiunge la risposta dell'IA alla cronologia per mantenere il filo logico
                             ws.conversationHistory.push({ role: 'assistant', content: replyText });
 
-                            // Limita la cronologia agli ultimi 10 messaggi per evitare di sovraccaricare i token
                             if (ws.conversationHistory.length > 10) {
                                 ws.conversationHistory = ws.conversationHistory.slice(-10);
                             }
@@ -230,11 +225,15 @@ wss.on('connection', (ws, req) => {
                             if (ws.readyState !== ws.OPEN) break;
                             const pcmPart = await getSingleTtsPcm(chunk);
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 1024;
+                                const chunkSize = 2048;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
+                                    
+                                    if (ws.bufferedAmount > 65536) {
+                                        await new Promise(resolve => setTimeout(resolve, 20));
+                                    }
+                                    
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
-                                    await new Promise(resolve => setTimeout(resolve, 4));
                                 }
                             }
                         }
