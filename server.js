@@ -47,7 +47,7 @@ async function getTtsPcmAudio(text) {
             ffmpeg.stdin.end();
         });
 
-        // Applicazione di un fade-in iniziale sui primi 1000 campioni per azzerare il "tic" o lo schiocco di apertura
+        // Fade-in iniziale per azzerare il "tic" di apertura
         const fadeSamples = Math.min(1000, pcmBuffer.length / 2);
         for (let i = 0; i < fadeSamples; i++) {
             const sample = pcmBuffer.readInt16LE(i * 2);
@@ -55,8 +55,13 @@ async function getTtsPcmAudio(text) {
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        console.log(`[TTS PCM] Convertiti e ripuliti ${pcmBuffer.length} byte PCM per: "${text}"`);
-        return pcmBuffer;
+        // Aggiunta di una coda di silenzio finale (200ms di zeri) per svuotare l'I2S senza loop
+        const silenceSamples = 3200; // 200ms a 16kHz
+        const silenceBuffer = Buffer.alloc(silenceSamples * 2, 0);
+        const finalBuffer = Buffer.concat([pcmBuffer, silenceBuffer]);
+
+        console.log(`[TTS PCM] Convertiti, ripuliti e paddati ${finalBuffer.length} byte per: "${text}"`);
+        return finalBuffer;
     } catch (err) {
         console.error("[Errore Conversione PCM]", err.message);
         return null;
@@ -166,10 +171,9 @@ wss.on('connection', (ws, req) => {
                             for (let i = 0; i < speechBuffer.length; i += chunkSize) {
                                 const chunk = speechBuffer.subarray(i, i + chunkSize);
                                 ws.send(chunk);
-                                // Ritardo leggermente ridotto e costante a 10ms per evitare svuotamenti del buffer ESP32
                                 await new Promise(resolve => setTimeout(resolve, 10));
                             }
-                            console.log("[WS] Flusso PCM stabile inviato.");
+                            console.log("[WS] Flusso audio con padding inviato.");
                         } else {
                             console.log("[WS] Impossibile generare l'audio.");
                         }
