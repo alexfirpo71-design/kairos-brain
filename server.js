@@ -39,7 +39,7 @@ function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSamp
     return Buffer.concat([header, audioBuffer]);
 }
 
-// Funzione per generare un tono PCM grezzo di test
+// Funzione per generare un tono PCM grezzo di test (440 Hz)
 function generatePcmBeep(durationMs = 1500, sampleRate = 16000) {
     const numSamples = (sampleRate * durationMs) / 1000;
     const buffer = Buffer.alloc(numSamples * 2);
@@ -94,7 +94,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
 
     const systemPrompt = `Sei Kairós, un assistente IA vocale avanzato integrato in un dispositivo hardware ESP32-S3 (Freenove). Stai parlando con ${userName}, un perito elettronico e sviluppatore che vive a Valbrevenna. 
 Stato e contesto tecnico attuale del progetto su cui state lavorando in tempo reale: "${deviceContext || 'Nessun dettaglio aggiuntivo.'}"
-Rispondi in modo diretto, brillante, amichevole, tecnico e competente in lingua italiana, tenendo sempre a mente i progressi hardware fatti (come pin I2S, decoder Opus e LittleFS).`;
+Rispondi in modo diretto, brillante, amichevole, tecnico e competente in lingua italiana, tenendo sempre a mente i progressi hardware fatti.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -137,13 +137,11 @@ wss.on('connection', (ws, req) => {
                 const data = JSON.parse(message.toString());
                 console.log('[WS] Ricevuto pacchetto JSON:', data);
 
-                // Cattura l'handshake iniziale, utente e contesto tecnico dall'ESP32
                 if (data.mac || data.context) {
                     if (data.mac) ws.deviceMac = data.mac;
                     if (data.user) ws.userName = data.user;
                     if (data.context) ws.deviceContext = data.context;
                     console.log(`[WS] Dispositivo registrato - MAC: ${ws.deviceMac}, Utente: ${ws.userName}`);
-                    console.log(`[WS] Contesto tecnico acquisito: ${ws.deviceContext}`);
                     return; 
                 }
 
@@ -179,10 +177,11 @@ wss.on('connection', (ws, req) => {
 
                     ws.send(responsePayload);
 
+                    // Invio dell'audio PCM grezzo di test (o futuro TTS) direttamente all'ESP32
                     setTimeout(() => {
                         const pcmAudioBuffer = generatePcmBeep(2000);
                         ws.send(pcmAudioBuffer);
-                        console.log("[WS] Inviati byte audio binari all'ESP32.");
+                        console.log("[WS] Inviati byte audio PCM binari all'ESP32.");
                     }, 100);
 
                     audioBuffer = [];
