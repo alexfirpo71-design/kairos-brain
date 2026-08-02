@@ -80,7 +80,6 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        // Fade-in iniziale pulito
         const fadeSamplesIn = Math.min(240, pcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = pcmBuffer.readInt16LE(i * 2);
@@ -88,7 +87,6 @@ async function getSingleTtsPcm(textChunk) {
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // Fade-out aggressivo e profondo sugli ultimi campioni per azzerare l'eco finale
         const fadeSamplesOut = Math.min(1200, pcmBuffer.length / 2);
         const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
@@ -112,10 +110,10 @@ async function transcribeAudio(audioBuffer) {
     const dataLength = audioBuffer.length;
     const fileLength = dataLength + 36;
     const header = Buffer.from([
-        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        0x52, 0x49, 0x46, 0x46,
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
-        0x57, 0x41, 0x56, 0x45, // "WAVE"
-        0x66, 0x6d, 0x74, 0x20, // "fmt "
+        0x57, 0x41, 0x56, 0x45,
+        0x66, 0x6d, 0x74, 0x20,
         16, 0, 0, 0,            
         1, 0,                   
         1, 0,                   
@@ -123,7 +121,7 @@ async function transcribeAudio(audioBuffer) {
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
         2, 0,                   
         16, 0,                  
-        0x64, 0x61, 0x74, 0x61, // "data"
+        0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
     const wavBuffer = Buffer.concat([header, audioBuffer]);
@@ -144,16 +142,18 @@ async function transcribeAudio(audioBuffer) {
     return data.text;
 }
 
-async function getGroqChatResponse(userText, userName = "Alessandro") {
+async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. Rispondi sempre in italiano in modo fluido, diretto, esaustivo e senza giri di parole o ripetizioni. Affronta qualsiasi argomento tecnico, scientifico o generale con precisione assoluta, esattamente come farebbe un modello di IA di livello superiore.`;
+    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. Parli sempre in italiano in modo fluido, diretto, esaustivo e senza ripetizioni. Ricordi e tieni conto dei messaggi precedenti della conversazione.`;
+
+    const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
+            messages: messages,
             max_tokens: 500,
             temperature: 0.7
         })
@@ -167,6 +167,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro") {
 wss.on('connection', (ws, req) => {
     console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.userName = "Alessandro";
+    ws.conversationHistory = []; // Memoria contestuale della sessione
     let audioBuffer = [];
 
     const pingInterval = setInterval(() => {
@@ -180,8 +181,13 @@ wss.on('connection', (ws, req) => {
         } else {
             try {
                 const data = JSON.parse(message.toString());
-                if (data.mac || data.context) {
-                    if (data.user) ws.userName = data.user;
+                
+                // Aggiorna nome utente se inviato dal dispositivo
+                if (data.user) {
+                    ws.userName = data.user;
+                }
+
+                if (data.mac || data.context || data.device) {
                     return;
                 }
 
@@ -193,9 +199,22 @@ wss.on('connection', (ws, req) => {
                     try {
                         const transcript = await transcribeAudio(completeAudioBuffer);
                         console.log(`[Whisper] Trascritto: "${transcript}"`);
+                        
                         if (transcript && transcript.trim().length > 0) {
-                            replyText = await getGroqChatResponse(transcript, ws.userName);
+                            // Aggiunge la domanda dell'utente alla cronologia
+                            ws.conversationHistory.push({ role: 'user', content: transcript });
+
+                            // Ottiene la risposta passando l'intera cronologia
+                            replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
                             console.log(`[Llama] Risposta: "${replyText}"`);
+
+                            // Aggiunge la risposta dell'IA alla cronologia per mantenere il filo logico
+                            ws.conversationHistory.push({ role: 'assistant', content: replyText });
+
+                            // Limita la cronologia agli ultimi 10 messaggi per evitare di sovraccaricare i token
+                            if (ws.conversationHistory.length > 10) {
+                                ws.conversationHistory = ws.conversationHistory.slice(-10);
+                            }
                         }
                     } catch (err) {
                         console.error("[Errore IA]", err);
