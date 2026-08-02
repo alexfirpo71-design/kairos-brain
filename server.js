@@ -11,11 +11,43 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-async function getTtsPcmAudio(text) {
+// Funzione di supporto per spezzare testi lunghi in blocchi sicuri per Google TTS (~180 caratteri)
+function splitTextIntoChunks(text, maxLength = 180) {
+    if (text.length <= maxLength) return [text];
+    const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
+    let chunks = [];
+    let currentChunk = "";
+
+    for (let sentence of sentences) {
+        if ((currentChunk + sentence).length <= maxLength) {
+            currentChunk += sentence;
+        } else {
+            if (currentChunk) chunks.push(currentChunk.trim());
+            if (sentence.length > maxLength) {
+                // Se una singola frase è troppo lunga, la spezziamo per parole
+                let words = sentence.split(" ");
+                let subChunk = "";
+                for (let word of words) {
+                    if ((subChunk + " " + word).length <= maxLength) {
+                        subChunk += (subChunk ? " " : "") + word;
+                    } else {
+                        if (subChunk) chunks.push(subChunk.trim());
+                        subChunk = word;
+                    }
+                }
+                currentChunk = subChunk;
+            } else {
+                currentChunk = sentence;
+            }
+        }
+    }
+    if (currentChunk) chunks.push(currentChunk.trim());
+    return chunks;
+}
+
+async function getSingleTtsPcm(textChunk) {
     try {
-        const safeText = text.length > 190 ? text.substring(0, 190) + "..." : text;
-        const cleanText = encodeURIComponent(safeText);
-        
+        const cleanText = encodeURIComponent(textChunk);
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
         
         const response = await fetch(ttsUrl, {
@@ -49,11 +81,41 @@ async function getTtsPcmAudio(text) {
             ffmpeg.stdin.end();
         });
 
-        // Restituiamo il buffer PCM diretto senza tagli che mangiano le prime sillabe
-        const silenceBuffer = Buffer.alloc(1600, 0); 
-        return Buffer.concat([pcmBuffer, silenceBuffer]);
+        // Applichiamo un leggerissimo fade-in sui primi campioni per eliminare la balbuzie/pop iniziale
+        const fadeSamples = Math.min(320, pcmBuffer.length / 2);
+        for (let i = 0; i < fadeSamples; i++) {
+            const sample = pcmBuffer.readInt16LE(i * 2);
+            const multiplier = i / fadeSamples;
+            pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
+        }
+
+        return pcmBuffer;
     } catch (err) {
-        console.error("[Errore Conversione PCM]", err.message);
+        console.error("[Errore Conversione PCM Singolo]", err.message);
+        return null;
+    }
+}
+
+async function getTtsPcmAudio(text) {
+    try {
+        const textChunks = splitTextIntoChunks(text, 180);
+        let pcmBuffers = [];
+
+        // Piccolo silenzio iniziale di sicurezza per l'hardware I2S
+        pcmBuffers.push(Buffer.alloc(1600, 0));
+
+        for (let chunk of textChunks) {
+            const pcmPart = await getSingleTtsPcm(chunk);
+            if (pcmPart && pcmPart.length > 0) {
+                pcmBuffers.push(pcmPart);
+                // Breve pausa tra una frase e l'altra per naturalità
+                pcmBuffers.push(Buffer.alloc(800, 0));
+            }
+        }
+
+        return Buffer.concat(pcmBuffers);
+    } catch (err) {
+        console.error("[Errore Conversione PCM Globale]", err.message);
         return null;
     }
 }
@@ -99,7 +161,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, un assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Rispondi in italiano in modo naturale, chiaro e completo.`;
+    const systemPrompt = `Sei Kairós, un assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Rispondi in italiano in modo naturale, chiaro, dettagliato ed esauriente quando richiesto.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -107,7 +169,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 150
+            max_tokens: 250 // Ottimizzato per discorsi completi ma gestibili in streaming
         })
     });
 
@@ -165,7 +227,7 @@ wss.on('connection', (ws, req) => {
                                     ws.send(chunk);
                                     await new Promise(resolve => setTimeout(resolve, 10));
                                 }
-                                console.log("[WS] Flusso PCM inviato correttamente.");
+                                console.log("[WS] Flusso PCM chunked inviato correttamente.");
                             } else {
                                 console.log("[WS] Impossibile generare l'audio.");
                             }
