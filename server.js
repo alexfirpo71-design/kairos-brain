@@ -10,13 +10,12 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Funzione per ottenere un flusso audio TTS da testo (Google TTS endpoint convertito in buffer)
+// Funzione TTS che richiede un formato WAV compatibile
 async function getTtsPcmAudio(text) {
     try {
-        // Tronchiamo il testo se troppo lungo per sicurezza
         const cleanText = encodeURIComponent(text.substring(0, 150));
-        // Chiediamo l'audio a Google Translate TTS in formato mp3/wav
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
+        // Usiamo un servizio TTS che restituisce WAV pulito (es. Streamlabs TTS o simili endpoint pubblici)
+        const ttsUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Bianca&text=${cleanText}`;
         
         const response = await fetch(ttsUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0' }
@@ -27,8 +26,6 @@ async function getTtsPcmAudio(text) {
         const arrayBuffer = await response.arrayBuffer();
         let audioBuffer = Buffer.from(arrayBuffer);
 
-        // NOTA: Google TTS ritorna MP3. Se l'ESP32 si aspetta PCM grezzo o se vogliamo convertirlo,
-        // inviamo direttamente il buffer MP3/WAV a blocchi sfruttando il canale WebSocket esistente.
         return audioBuffer;
     } catch (err) {
         console.error("[Errore TTS]", err);
@@ -40,7 +37,6 @@ async function transcribeAudio(audioBuffer) {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) throw new Error("GROQ_API_KEY mancante.");
 
-    // Ricostruiamo un header WAV fittizio per Whisper
     const dataLength = audioBuffer.length;
     const fileLength = dataLength + 36;
     const header = Buffer.from([
@@ -78,7 +74,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo ESTREMAMENTE sintetico (massimo 10-15 parole) in italiano, così la risposta vocale è breve e diretta.`;
+    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo ESTREMAMENTE sintetico (massimo 10 parole) in italiano.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -86,7 +82,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 60
+            max_tokens: 50
         })
     });
 
@@ -130,10 +126,8 @@ wss.on('connection', (ws, req) => {
                         console.error("[Errore IA]", err);
                     }
 
-                    // 1. Invia il testo al client
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
-                    // 2. Genera l'audio parlato corrispondente al testo di Llama e invialo a blocchi
                     setTimeout(async () => {
                         const speechBuffer = await getTtsPcmAudio(replyText);
                         
@@ -144,9 +138,9 @@ wss.on('connection', (ws, req) => {
                                 ws.send(chunk);
                                 await new Promise(resolve => setTimeout(resolve, 15));
                             }
-                            console.log("[WS] Audio parlato inviato a blocchi.");
+                            console.log("[WS] Audio vocale inviato a blocchi.");
                         } else {
-                            console.log("[WS] Impossibile generare l'audio parlato.");
+                            console.log("[WS] Impossibile generare l'audio vocale.");
                         }
                     }, 200);
 
