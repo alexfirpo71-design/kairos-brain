@@ -13,8 +13,8 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 async function getTtsPcmAudio(text) {
     try {
-        // Tagliamo a 400 caratteri per sicurezza con Google TTS, così regge anche le barzellette
-        const cleanText = encodeURIComponent(text.substring(0, 400));
+        // Tagliamo a 500 caratteri per gestire anche risposte più ricche e discorsive
+        const cleanText = encodeURIComponent(text.substring(0, 500));
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
         
         const response = await fetch(ttsUrl, {
@@ -112,7 +112,8 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in italiano in modo naturale ed efficiente: sii sintetico nelle conversazioni quotidiane, ma dai risposte complete e sensate se ti vengono chieste barzellette, storie o spiegazioni.`;
+    // Prompt aperto a spiegazioni, storie, barzellette e risposte lunghe ed esaustive
+    const systemPrompt = `Sei Kairós, un assistente IA vocale avanzato su ESP32-S3. Parli con ${userName} a Valbrevenna (usando il contesto fornito). Puoi dare risposte complete, argomentate, raccontare storie, barzellette e spiegare qualsiasi argomento in modo approfondito, naturale e dettagliato in italiano.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -120,7 +121,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 300 // <-- Aumentato da 70 a 300 per consentire barzellette e storie complete
+            max_tokens: 350 // Spazio ampio per discorsi lunghi e dettagliati
         })
     });
 
@@ -178,7 +179,7 @@ wss.on('connection', (ws, req) => {
                                     ws.send(chunk);
                                     await new Promise(resolve => setTimeout(resolve, 10));
                                 }
-                                console.log("[WS] Flusso PCM inviato correttamente.");
+                                console.log("[WS] Flusso PCM esteso inviato correttamente.");
                             } else {
                                 console.log("[WS] Impossibile generare l'audio.");
                             }
