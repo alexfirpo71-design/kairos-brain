@@ -39,11 +39,11 @@ function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSamp
     return Buffer.concat([header, audioBuffer]);
 }
 
-// Funzione per generare un tono PCM grezzo di test (onda sinusoidale o bip)
+// Funzione per generare un tono PCM grezzo di test
 function generatePcmBeep(durationMs = 1500, sampleRate = 16000) {
     const numSamples = (sampleRate * durationMs) / 1000;
-    const buffer = Buffer.alloc(numSamples * 2); // 16-bit PCM = 2 bytes per sample
-    const frequency = 440; // Nota La (440 Hz)
+    const buffer = Buffer.alloc(numSamples * 2);
+    const frequency = 440;
 
     for (let i = 0; i < numSamples; i++) {
         const t = i / sampleRate;
@@ -57,7 +57,7 @@ function generatePcmBeep(durationMs = 1500, sampleRate = 16000) {
 async function transcribeAudio(audioBuffer) {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
-        throw new Error("GROQ_API_KEY non configurata nelle variabili d'ambiente di Render.");
+        throw new Error("GROQ_API_KEY non configurata nelle variabili d'ambiente.");
     }
 
     const wavBuffer = addWavHeader(audioBuffer);
@@ -88,8 +88,8 @@ async function transcribeAudio(audioBuffer) {
     return data.text;
 }
 
-// Funzione per interrogare il modello LLM di Groq con il testo trascritto
-async function getGroqChatResponse(userText) {
+// Funzione per interrogare il modello LLM di Groq con il testo trascritto e contesto utente
+async function getGroqChatResponse(userText, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -101,7 +101,10 @@ async function getGroqChatResponse(userText) {
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [
-                { role: 'system', content: 'Sei Kairós, un assistente IA vocale integrato in un dispositivo hardware con speaker. Rispondi sempre in modo estremamente conciso, naturale e adatto a essere letto ad alta voce, senza mai dire di essere solo un assistente testuale.' },
+                { 
+                    role: 'system', 
+                    content: `Sei Kairós, un assistente IA vocale avanzato integrato in un dispositivo hardware ESP32-S3. Stai parlando con ${userName}, un perito elettronico e sviluppatore che vive a Valbrevenna. Conosci i suoi progetti hardware, la sua passione per la tecnologia e rispondi in modo diretto, amichevole e competente in lingua italiana.` 
+                },
                 { role: 'user', content: userText }
             ],
             max_tokens: 150
@@ -119,7 +122,9 @@ async function getGroqChatResponse(userText) {
 
 wss.on('connection', (ws, req) => {
     console.log(`[WS] Dispositivo ESP32 connesso con successo da: ${req.socket.remoteAddress}`);
-
+    
+    ws.deviceMac = null;
+    ws.userName = "Alessandro";
     let audioBuffer = [];
 
     ws.on('message', async (message, isBinary) => {
@@ -128,14 +133,21 @@ wss.on('connection', (ws, req) => {
         } else {
             try {
                 const data = JSON.parse(message.toString());
-                console.log('[WS] Ricevuto JSON di stato:', data);
+                console.log('[WS] Ricevuto pacchetto JSON:', data);
+
+                // Cattura l'handshake iniziale con il MAC address dall'ESP32
+                if (data.mac) {
+                    ws.deviceMac = data.mac;
+                    if (data.user) ws.userName = data.user;
+                    console.log(`[WS] Dispositivo registrato - MAC: ${ws.deviceMac}, Utente: ${ws.userName}`);
+                    return; 
+                }
 
                 if (data.state === 'processing') {
                     const totalBytes = audioBuffer.reduce((acc, chunk) => acc + chunk.length, 0);
                     console.log(`[WS] Elaborazione audio completata. Chunk: ${audioBuffer.length}, Byte: ${totalBytes}`);
 
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
-
                     let replyText = "Ricevuto.";
 
                     try {
@@ -145,7 +157,7 @@ wss.on('connection', (ws, req) => {
 
                         if (transcript && transcript.trim().length > 0) {
                             console.log("[Groq] Generazione risposta LLM...");
-                            replyText = await getGroqChatResponse(transcript);
+                            replyText = await getGroqChatResponse(transcript, ws.userName);
                             console.log(`[Groq] Risposta LLM: "${replyText}"`);
                         } else {
                             replyText = "Non ho udito alcun messaggio chiaro.";
@@ -161,10 +173,8 @@ wss.on('connection', (ws, req) => {
                         text: replyText
                     });
 
-                    // 1. Invia prima il pacchetto JSON con il testo
                     ws.send(responsePayload);
 
-                    // 2. Invia l'audio binario con un ritardo per permettere all'ESP32 di gestirli in sequenza
                     setTimeout(() => {
                         const pcmAudioBuffer = generatePcmBeep(2000);
                         ws.send(pcmAudioBuffer);
