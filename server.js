@@ -13,7 +13,8 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 async function getTtsPcmAudio(text) {
     try {
-        const cleanText = encodeURIComponent(text.substring(0, 150));
+        // Aumentato leggermente il limite caratteri per TTS per gestire risposte un po' più lunghe
+        const cleanText = encodeURIComponent(text.substring(0, 300));
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
         
         const response = await fetch(ttsUrl, {
@@ -47,20 +48,45 @@ async function getTtsPcmAudio(text) {
             ffmpeg.stdin.end();
         });
 
-        // Fade-in iniziale per azzerare il "tic" di apertura
-        const fadeSamples = Math.min(1000, pcmBuffer.length / 2);
-        for (let i = 0; i < fadeSamples; i++) {
-            const sample = pcmBuffer.readInt16LE(i * 2);
-            const multiplier = i / fadeSamples;
-            pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
+        // --- NOISE GATE & FADE IN/OUT (Elimina il metronomo / ticchettii) ---
+        const totalSamples = pcmBuffer.length / 2;
+        const threshold = 150; // Soglia di ampiezza minima per considerare rumore o silenzio
+
+        // 1. Taglia il silenzio/rumore iniziale
+        let startSample = 0;
+        for (let i = 0; i < Math.min(totalSamples, 4000); i++) {
+            if (Math.abs(pcmBuffer.readInt16LE(i * 2)) > threshold) {
+                startSample = Math.max(0, i - 10); // Piccolo margine di sicurezza
+                break;
+            }
         }
 
-        // Aggiunta di una coda di silenzio finale (200ms di zeri) per svuotare l'I2S senza loop
-        const silenceSamples = 3200; // 200ms a 16kHz
-        const silenceBuffer = Buffer.alloc(silenceSamples * 2, 0);
-        const finalBuffer = Buffer.concat([pcmBuffer, silenceBuffer]);
+        // 2. Taglia il silenzio/rumore finale
+        let endSample = totalSamples;
+        for (let i = totalSamples - 1; i > Math.max(0, totalSamples - 4000); i--) {
+            if (Math.abs(pcmBuffer.readInt16LE(i * 2)) > threshold) {
+                endSample = Math.min(totalSamples, i + 10);
+                break;
+            }
+        }
 
-        console.log(`[TTS PCM] Convertiti, ripuliti e paddati ${finalBuffer.length} byte per: "${text}"`);
+        // Estrae il buffer pulito dai fruscii di testa e coda
+        const slicedBuffer = pcmBuffer.subarray(startSample * 2, endSample * 2);
+
+        // 3. Applicazione fade-in iniziale (20ms) per un attacco morbidissimo senza "tic"
+        const fadeSamples = Math.min(320, slicedBuffer.length / 2);
+        for (let i = 0; i < fadeSamples; i++) {
+            const sample = slicedBuffer.readInt16LE(i * 2);
+            const multiplier = i / fadeSamples;
+            slicedBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
+        }
+
+        // 4. Aggiunta coda di silenzio finale (150ms) per rilasciare l'I2S senza loop
+        const silenceSamples = 2400; 
+        const silenceBuffer = Buffer.alloc(silenceSamples * 2, 0);
+        const finalBuffer = Buffer.concat([slicedBuffer, silenceBuffer]);
+
+        console.log(`[TTS PCM] Pulito e convertito: ${finalBuffer.length} byte per: "${text}"`);
         return finalBuffer;
     } catch (err) {
         console.error("[Errore Conversione PCM]", err.message);
@@ -109,7 +135,8 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo ESTREMAMENTE sintetico (massimo 8 parole) in italiano.`;
+    // Prompt ampliato: naturale ed elastico, permette risposte più articolate se richieste (es. barzellette, storie)
+    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in italiano in modo naturale, conciso ma esauriente (fornisci risposte complete se ti viene chiesto di raccontare barzellette, storie o spiegazioni).`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -117,7 +144,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 40
+            max_tokens: 150 // Aumentato il limite di token per evitare tagli a metà delle risposte
         })
     });
 
@@ -173,7 +200,7 @@ wss.on('connection', (ws, req) => {
                                 ws.send(chunk);
                                 await new Promise(resolve => setTimeout(resolve, 10));
                             }
-                            console.log("[WS] Flusso audio con padding inviato.");
+                            console.log("[WS] Flusso PCM pulito inviato.");
                         } else {
                             console.log("[WS] Impossibile generare l'audio.");
                         }
