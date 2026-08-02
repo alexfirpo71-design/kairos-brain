@@ -11,7 +11,6 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Funzione di supporto per spezzare testi lunghi in blocchi sicuri per Google TTS (~180 caratteri)
 function splitTextIntoChunks(text, maxLength = 180) {
     if (text.length <= maxLength) return [text];
     const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
@@ -24,7 +23,6 @@ function splitTextIntoChunks(text, maxLength = 180) {
         } else {
             if (currentChunk) chunks.push(currentChunk.trim());
             if (sentence.length > maxLength) {
-                // Se una singola frase è troppo lunga, la spezziamo per parole
                 let words = sentence.split(" ");
                 let subChunk = "";
                 for (let word of words) {
@@ -81,7 +79,6 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        // Applichiamo un leggerissimo fade-in sui primi campioni per eliminare la balbuzie/pop iniziale
         const fadeSamples = Math.min(320, pcmBuffer.length / 2);
         for (let i = 0; i < fadeSamples; i++) {
             const sample = pcmBuffer.readInt16LE(i * 2);
@@ -101,17 +98,19 @@ async function getTtsPcmAudio(text) {
         const textChunks = splitTextIntoChunks(text, 180);
         let pcmBuffers = [];
 
-        // Piccolo silenzio iniziale di sicurezza per l'hardware I2S
+        // Silenzio iniziale di sicurezza per l'hardware I2S
         pcmBuffers.push(Buffer.alloc(1600, 0));
 
         for (let chunk of textChunks) {
             const pcmPart = await getSingleTtsPcm(chunk);
             if (pcmPart && pcmPart.length > 0) {
                 pcmBuffers.push(pcmPart);
-                // Breve pausa tra una frase e l'altra per naturalità
-                pcmBuffers.push(Buffer.alloc(800, 0));
+                pcmBuffers.push(Buffer.alloc(800, 0)); // Pausa tra frasi
             }
         }
+
+        // AGGIUNTA: Silenzio di coda robusto per evitare che l'I2S si incanti sull'ultimo campione
+        pcmBuffers.push(Buffer.alloc(3200, 0));
 
         return Buffer.concat(pcmBuffers);
     } catch (err) {
@@ -169,7 +168,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 250 // Ottimizzato per discorsi completi ma gestibili in streaming
+            max_tokens: 250
         })
     });
 
@@ -184,6 +183,15 @@ wss.on('connection', (ws, req) => {
     ws.userName = "Alessandro";
     ws.deviceContext = "";
     let audioBuffer = [];
+
+    // Keep-alive periodico per evitare il timeout della connessione inattiva
+    const pingInterval = setInterval(() => {
+        if (ws.readyState === ws.OPEN) {
+            ws.ping();
+        } else {
+            clearInterval(pingInterval);
+        }
+    }, 30000);
 
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
@@ -245,6 +253,7 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
+        clearInterval(pingInterval);
         console.log("[WS] Connessione chiusa.");
     });
 });
