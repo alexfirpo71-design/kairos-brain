@@ -239,6 +239,9 @@ wss.on('connection', (ws, req) => {
                         }
 
                         console.log("[WS] Streaming audio completato pulito.");
+                        if (ws.readyState === ws.OPEN) {
+                            ws.send(JSON.stringify({ action: 'stop', state: 'idle' }));
+                        }
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
                     }
