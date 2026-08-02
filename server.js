@@ -80,6 +80,7 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
+        // Fade-in iniziale
         const fadeSamplesIn = Math.min(240, pcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = pcmBuffer.readInt16LE(i * 2);
@@ -87,7 +88,8 @@ async function getSingleTtsPcm(textChunk) {
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        const fadeSamplesOut = Math.min(240, pcmBuffer.length / 2);
+        // Fade-out finale aggressivo per azzerare completamente la fine
+        const fadeSamplesOut = Math.min(480, pcmBuffer.length / 2);
         const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
             const idx = (startOutIdx + i) * 2;
@@ -185,7 +187,7 @@ wss.on('connection', (ws, req) => {
 
                 if (data.state === 'processing') {
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
-                    audioBuffer = []; // Svuotiamo subito il buffer
+                    audioBuffer = [];
 
                     let replyText = "Ricevuto.";
                     try {
@@ -205,7 +207,7 @@ wss.on('connection', (ws, req) => {
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 180);
                         
-                        // Silenzio iniziale
+                        // Silenzio iniziale pulito
                         ws.send(Buffer.alloc(400, 0));
 
                         for (let chunk of textChunks) {
@@ -222,10 +224,10 @@ wss.on('connection', (ws, req) => {
                             }
                         }
 
-                        // Coda di chiusura antiblocco I2S
-                        ws.send(Buffer.alloc(2400, 0));
+                        // Coda di chiusura con extra silenzio per azzerare l'eco finale
+                        ws.send(Buffer.alloc(3200, 0));
 
-                        console.log("[WS] Streaming audio completato e chiuso pulito.");
+                        console.log("[WS] Streaming audio completato senza eco.");
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
                     }
