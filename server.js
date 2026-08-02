@@ -79,11 +79,22 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        const fadeSamples = Math.min(320, pcmBuffer.length / 2);
-        for (let i = 0; i < fadeSamples; i++) {
+        // Fade-in iniziale per evitare la balbuzie sulle prime sillabe
+        const fadeSamplesIn = Math.min(320, pcmBuffer.length / 2);
+        for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = pcmBuffer.readInt16LE(i * 2);
-            const multiplier = i / fadeSamples;
+            const multiplier = i / fadeSamplesIn;
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
+        }
+
+        // Fade-out finale sul singolo pezzo per chiudere dolcemente
+        const fadeSamplesOut = Math.min(320, pcmBuffer.length / 2);
+        const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
+        for (let i = 0; i < fadeSamplesOut; i++) {
+            const idx = (startOutIdx + i) * 2;
+            const sample = pcmBuffer.readInt16LE(idx);
+            const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
+            pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
         }
 
         return pcmBuffer;
@@ -98,19 +109,16 @@ async function getTtsPcmAudio(text) {
         const textChunks = splitTextIntoChunks(text, 180);
         let pcmBuffers = [];
 
-        // Silenzio iniziale di sicurezza per l'hardware I2S
-        pcmBuffers.push(Buffer.alloc(1600, 0));
+        // Piccolo silenzio iniziale di sicurezza
+        pcmBuffers.push(Buffer.alloc(800, 0));
 
         for (let chunk of textChunks) {
             const pcmPart = await getSingleTtsPcm(chunk);
             if (pcmPart && pcmPart.length > 0) {
                 pcmBuffers.push(pcmPart);
-                pcmBuffers.push(Buffer.alloc(800, 0)); // Pausa tra frasi
+                pcmBuffers.push(Buffer.alloc(400, 0)); // Breve stacco tra le frasi
             }
         }
-
-        // AGGIUNTA: Silenzio di coda robusto per evitare che l'I2S si incanti sull'ultimo campione
-        pcmBuffers.push(Buffer.alloc(3200, 0));
 
         return Buffer.concat(pcmBuffers);
     } catch (err) {
@@ -184,7 +192,6 @@ wss.on('connection', (ws, req) => {
     ws.deviceContext = "";
     let audioBuffer = [];
 
-    // Keep-alive periodico per evitare il timeout della connessione inattiva
     const pingInterval = setInterval(() => {
         if (ws.readyState === ws.OPEN) {
             ws.ping();
