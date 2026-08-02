@@ -13,7 +13,6 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 async function getTtsPcmAudio(text) {
     try {
-        // Aumentato leggermente il limite caratteri per TTS per gestire risposte un po' più lunghe
         const cleanText = encodeURIComponent(text.substring(0, 300));
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
         
@@ -48,32 +47,29 @@ async function getTtsPcmAudio(text) {
             ffmpeg.stdin.end();
         });
 
-        // --- NOISE GATE & FADE IN/OUT (Elimina il metronomo / ticchettii) ---
+        // --- TAGLIO CHURURGICO DI TESTA E CODA (Elimina il metronomo / balbettio) ---
         const totalSamples = pcmBuffer.length / 2;
-        const threshold = 150; // Soglia di ampiezza minima per considerare rumore o silenzio
+        const threshold = 200; // Soglia di ampiezza per intercettare il fruscio iniziale
 
-        // 1. Taglia il silenzio/rumore iniziale
         let startSample = 0;
         for (let i = 0; i < Math.min(totalSamples, 4000); i++) {
             if (Math.abs(pcmBuffer.readInt16LE(i * 2)) > threshold) {
-                startSample = Math.max(0, i - 10); // Piccolo margine di sicurezza
+                startSample = Math.max(0, i - 15);
                 break;
             }
         }
 
-        // 2. Taglia il silenzio/rumore finale
         let endSample = totalSamples;
         for (let i = totalSamples - 1; i > Math.max(0, totalSamples - 4000); i--) {
             if (Math.abs(pcmBuffer.readInt16LE(i * 2)) > threshold) {
-                endSample = Math.min(totalSamples, i + 10);
+                endSample = Math.min(totalSamples, i + 15);
                 break;
             }
         }
 
-        // Estrae il buffer pulito dai fruscii di testa e coda
         const slicedBuffer = pcmBuffer.subarray(startSample * 2, endSample * 2);
 
-        // 3. Applicazione fade-in iniziale (20ms) per un attacco morbidissimo senza "tic"
+        // --- FADE-IN INIZIALE (20ms) ---
         const fadeSamples = Math.min(320, slicedBuffer.length / 2);
         for (let i = 0; i < fadeSamples; i++) {
             const sample = slicedBuffer.readInt16LE(i * 2);
@@ -81,12 +77,11 @@ async function getTtsPcmAudio(text) {
             slicedBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // 4. Aggiunta coda di silenzio finale (150ms) per rilasciare l'I2S senza loop
-        const silenceSamples = 2400; 
-        const silenceBuffer = Buffer.alloc(silenceSamples * 2, 0);
+        // --- CODA DI SILENZIO FINALE ---
+        const silenceBuffer = Buffer.alloc(2400, 0); 
         const finalBuffer = Buffer.concat([slicedBuffer, silenceBuffer]);
 
-        console.log(`[TTS PCM] Pulito e convertito: ${finalBuffer.length} byte per: "${text}"`);
+        console.log(`[TTS PCM] Pulito senza balbettii: ${finalBuffer.length} byte per: "${text}"`);
         return finalBuffer;
     } catch (err) {
         console.error("[Errore Conversione PCM]", err.message);
@@ -135,8 +130,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    // Prompt ampliato: naturale ed elastico, permette risposte più articolate se richieste (es. barzellette, storie)
-    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in italiano in modo naturale, conciso ma esauriente (fornisci risposte complete se ti viene chiesto di raccontare barzellette, storie o spiegazioni).`;
+    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in italiano in modo naturale ed efficiente: sii sintetico nelle conversazioni quotidiane, ma dai risposte complete e sensate se ti vengono chieste barzellette, storie o spiegazioni.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -144,7 +138,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 150 // Aumentato il limite di token per evitare tagli a metà delle risposte
+            max_tokens: 70 // Bilanciato: risposte rapide ma capaci di completare barzellette o spiegazioni
         })
     });
 
