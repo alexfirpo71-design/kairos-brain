@@ -89,7 +89,7 @@ async function getSingleTtsPcm(textChunk) {
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // Fade-out finale per chiudere dolcemente senza "metronomo" o tic-tac
+        // Fade-out finale per chiudere dolcemente senza tic-tac o metronomo
         const fadeSamplesOut = Math.min(320, pcmBuffer.length / 2);
         const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
@@ -170,7 +170,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, un assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Rispondi in italiano in modo naturale, chiaro, dettagliato ed esauriente quando richiesto.`;
+    const systemPrompt = `Sei Kairós, l'assistente IA vocale personale di ${userName}. Rispondi sempre in italiano in modo gentile ma diretto, andando dritto al punto ed evitando ripetizioni o formule di cortesia superflue. Fornisci risposte precise, chiare ed esaurienti.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -178,7 +178,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 250
+            max_tokens: 500
         })
     });
 
@@ -194,7 +194,6 @@ wss.on('connection', (ws, req) => {
     ws.deviceContext = "";
     let audioBuffer = [];
 
-    // Keep-alive periodico per evitare il timeout della connessione inattiva
     const pingInterval = setInterval(() => {
         if (ws.readyState === ws.OPEN) {
             ws.ping();
