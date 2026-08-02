@@ -88,9 +88,13 @@ async function transcribeAudio(audioBuffer) {
     return data.text;
 }
 
-// Funzione per interrogare il modello LLM di Groq con il testo trascritto e contesto utente
-async function getGroqChatResponse(userText, userName = "Alessandro") {
+// Funzione per interrogare il modello LLM di Groq integrando il contesto hardware live
+async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
+
+    const systemPrompt = `Sei Kairós, un assistente IA vocale avanzato integrato in un dispositivo hardware ESP32-S3 (Freenove). Stai parlando con ${userName}, un perito elettronico e sviluppatore che vive a Valbrevenna. 
+Stato e contesto tecnico attuale del progetto su cui state lavorando in tempo reale: "${deviceContext || 'Nessun dettaglio aggiuntivo.'}"
+Rispondi in modo diretto, brillante, amichevole, tecnico e competente in lingua italiana, tenendo sempre a mente i progressi hardware fatti (come pin I2S, decoder Opus e LittleFS).`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -101,13 +105,10 @@ async function getGroqChatResponse(userText, userName = "Alessandro") {
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [
-                { 
-                    role: 'system', 
-                    content: `Sei Kairós, un assistente IA vocale avanzato integrato in un dispositivo hardware ESP32-S3. Stai parlando con ${userName}, un perito elettronico e sviluppatore che vive a Valbrevenna. Conosci i suoi progetti hardware, la sua passione per la tecnologia e rispondi in modo diretto, amichevole e competente in lingua italiana.` 
-                },
+                { role: 'system', content: systemPrompt },
                 { role: 'user', content: userText }
             ],
-            max_tokens: 150
+            max_tokens: 200
         })
     });
 
@@ -125,6 +126,7 @@ wss.on('connection', (ws, req) => {
     
     ws.deviceMac = null;
     ws.userName = "Alessandro";
+    ws.deviceContext = "";
     let audioBuffer = [];
 
     ws.on('message', async (message, isBinary) => {
@@ -135,11 +137,13 @@ wss.on('connection', (ws, req) => {
                 const data = JSON.parse(message.toString());
                 console.log('[WS] Ricevuto pacchetto JSON:', data);
 
-                // Cattura l'handshake iniziale con il MAC address dall'ESP32
-                if (data.mac) {
-                    ws.deviceMac = data.mac;
+                // Cattura l'handshake iniziale, utente e contesto tecnico dall'ESP32
+                if (data.mac || data.context) {
+                    if (data.mac) ws.deviceMac = data.mac;
                     if (data.user) ws.userName = data.user;
+                    if (data.context) ws.deviceContext = data.context;
                     console.log(`[WS] Dispositivo registrato - MAC: ${ws.deviceMac}, Utente: ${ws.userName}`);
+                    console.log(`[WS] Contesto tecnico acquisito: ${ws.deviceContext}`);
                     return; 
                 }
 
@@ -156,8 +160,8 @@ wss.on('connection', (ws, req) => {
                         console.log(`[Groq] Trascrizione: "${transcript}"`);
 
                         if (transcript && transcript.trim().length > 0) {
-                            console.log("[Groq] Generazione risposta LLM...");
-                            replyText = await getGroqChatResponse(transcript, ws.userName);
+                            console.log("[Groq] Generazione risposta LLM con contesto...");
+                            replyText = await getGroqChatResponse(transcript, ws.userName, ws.deviceContext);
                             console.log(`[Groq] Risposta LLM: "${replyText}"`);
                         } else {
                             replyText = "Non ho udito alcun messaggio chiaro.";
