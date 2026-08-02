@@ -58,7 +58,6 @@ async function getSingleTtsPcm(textChunk) {
         const mp3Buffer = Buffer.from(arrayBuffer);
 
         const pcmBuffer = await new Promise((resolve, reject) => {
-            // Catena filtri FFmpeg: velocità a 1.15, equalizzazione calda e compressore pulito
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
                 '-af', 'atempo=1.15,equalizer=f=300:width_type=o:width=2:g=3,equalizer=f=3000:width_type=o:width=2:g=-2,acompressor=threshold=-18dB:ratio=3:attack=5:release=50',
@@ -81,16 +80,14 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        // Fade-in iniziale per evitare la balbuzie sulle prime sillabe
-        const fadeSamplesIn = Math.min(320, pcmBuffer.length / 2);
+        const fadeSamplesIn = Math.min(240, pcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = pcmBuffer.readInt16LE(i * 2);
             const multiplier = i / fadeSamplesIn;
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // Fade-out finale per chiudere dolcemente senza tic-tac o metronomo
-        const fadeSamplesOut = Math.min(320, pcmBuffer.length / 2);
+        const fadeSamplesOut = Math.min(240, pcmBuffer.length / 2);
         const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
             const idx = (startOutIdx + i) * 2;
@@ -101,30 +98,7 @@ async function getSingleTtsPcm(textChunk) {
 
         return pcmBuffer;
     } catch (err) {
-        console.error("[Errore Conversione PCM Singolo]", err.message);
-        return null;
-    }
-}
-
-async function getTtsPcmAudio(text) {
-    try {
-        const textChunks = splitTextIntoChunks(text, 180);
-        let pcmBuffers = [];
-
-        // Piccolo silenzio iniziale di sicurezza
-        pcmBuffers.push(Buffer.alloc(800, 0));
-
-        for (let chunk of textChunks) {
-            const pcmPart = await getSingleTtsPcm(chunk);
-            if (pcmPart && pcmPart.length > 0) {
-                pcmBuffers.push(pcmPart);
-                pcmBuffers.push(Buffer.alloc(400, 0)); // Breve stacco tra le frasi
-            }
-        }
-
-        return Buffer.concat(pcmBuffers);
-    } catch (err) {
-        console.error("[Errore Conversione PCM Globale]", err.message);
+        console.error("[Errore TTS Singolo]", err.message);
         return null;
     }
 }
@@ -168,9 +142,9 @@ async function transcribeAudio(audioBuffer) {
     return data.text;
 }
 
-async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
+async function getGroqChatResponse(userText, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, l'assistente IA vocale personale di ${userName}. Rispondi sempre in italiano in modo gentile ma diretto, andando dritto al punto ed evitando ripetizioni o formule di cortesia superflue. Fornisci risposte precise, chiare ed esaurienti.`;
+    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. Rispondi sempre in italiano in modo fluido, diretto, esaustivo e senza giri di parole o ripetizioni. Affronta qualsiasi argomento tecnico, scientifico o generale con precisione assoluta, esattamente come farebbe un modello di IA di livello superiore.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -178,7 +152,8 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 500
+            max_tokens: 500,
+            temperature: 0.7
         })
     });
 
@@ -189,17 +164,12 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
 
 wss.on('connection', (ws, req) => {
     console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
-    ws.deviceMac = null;
     ws.userName = "Alessandro";
-    ws.deviceContext = "";
     let audioBuffer = [];
 
     const pingInterval = setInterval(() => {
-        if (ws.readyState === ws.OPEN) {
-            ws.ping();
-        } else {
-            clearInterval(pingInterval);
-        }
+        if (ws.readyState === ws.OPEN) ws.ping();
+        else clearInterval(pingInterval);
     }, 30000);
 
     ws.on('message', async (message, isBinary) => {
@@ -209,51 +179,56 @@ wss.on('connection', (ws, req) => {
             try {
                 const data = JSON.parse(message.toString());
                 if (data.mac || data.context) {
-                    if (data.mac) ws.deviceMac = data.mac;
                     if (data.user) ws.userName = data.user;
-                    if (data.context) ws.deviceContext = data.context;
                     return;
                 }
 
                 if (data.state === 'processing') {
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
-                    let replyText = "Ricevuto.";
+                    audioBuffer = []; // Svuotiamo subito il buffer per liberare memoria
 
+                    let replyText = "Ricevuto.";
                     try {
                         const transcript = await transcribeAudio(completeAudioBuffer);
                         console.log(`[Whisper] Trascritto: "${transcript}"`);
                         if (transcript && transcript.trim().length > 0) {
-                            replyText = await getGroqChatResponse(transcript, ws.userName, ws.deviceContext);
+                            replyText = await getGroqChatResponse(transcript, ws.userName);
                             console.log(`[Llama] Risposta: "${replyText}"`);
                         }
                     } catch (err) {
                         console.error("[Errore IA]", err);
+                        replyText = "Si è verificato un errore di elaborazione.";
                     }
 
+                    // Notifica subito l'ESP32 che il testo è pronto
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
-                    setTimeout(async () => {
-                        try {
-                            const speechBuffer = await getTtsPcmAudio(replyText);
-                            
-                            if (speechBuffer && speechBuffer.length > 0) {
-                                const chunkSize = 1024;
-                                for (let i = 0; i < speechBuffer.length; i += chunkSize) {
-                                    if (ws.readyState !== ws.OPEN) break;
-                                    const chunk = speechBuffer.subarray(i, i + chunkSize);
-                                    ws.send(chunk);
-                                    await new Promise(resolve => setTimeout(resolve, 10));
-                                }
-                                console.log("[WS] Flusso PCM chunked inviato correttamente.");
-                            } else {
-                                console.log("[WS] Impossibile generare l'audio.");
-                            }
-                        } catch (streamErr) {
-                            console.error("[Errore Streaming Audio]", streamErr);
-                        }
-                    }, 200);
+                    // Streaming sequenziale ultra-reattivo frase per frase
+                    try {
+                        const textChunks = splitTextIntoChunks(replyText, 180);
+                        
+                        // Invia un piccolo silenzio iniziale
+                        const initialSilence = Buffer.alloc(400, 0);
+                        ws.send(initialSilence);
 
-                    audioBuffer = [];
+                        for (let chunk of textChunks) {
+                            if (ws.readyState !== ws.OPEN) break;
+                            const pcmPart = await getSingleTtsPcm(chunk);
+                            if (pcmPart && pcmPart.length > 0) {
+                                const chunkSize = 1024;
+                                for (let i = 0; i < pcmPart.length; i += chunkSize) {
+                                    if (ws.readyState !== ws.OPEN) break;
+                                    ws.send(pcmPart.subarray(i, i + chunkSize));
+                                    await new Promise(resolve => setTimeout(resolve, 5)); // Invio fulmineo
+                                }
+                                // Brevissima pausa naturale tra i chunk di testo
+                                ws.send(Buffer.alloc(200, 0));
+                            }
+                        }
+                        console.log("[WS] Streaming audio completato con successo.");
+                    } catch (streamErr) {
+                        console.error("[Errore Streaming Audio]", streamErr);
+                    }
                 }
             } catch (e) {
                 console.log('[WS Testo]', message.toString());
