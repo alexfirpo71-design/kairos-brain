@@ -47,41 +47,41 @@ async function getTtsPcmAudio(text) {
             ffmpeg.stdin.end();
         });
 
-        // --- TAGLIO CHURURGICO DI TESTA E CODA (Elimina il metronomo / balbettio) ---
+        // --- TAGLIO AGGRESSIVO DEL METRONOMO / TICCHETTO INIZIALE ---
         const totalSamples = pcmBuffer.length / 2;
-        const threshold = 200; // Soglia di ampiezza per intercettare il fruscio iniziale
+        const threshold = 400; // Soglia per saltare fruscii e click iniziali
 
         let startSample = 0;
-        for (let i = 0; i < Math.min(totalSamples, 4000); i++) {
+        for (let i = 0; i < Math.min(totalSamples, 6000); i++) {
             if (Math.abs(pcmBuffer.readInt16LE(i * 2)) > threshold) {
-                startSample = Math.max(0, i - 15);
+                startSample = Math.max(0, i - 5);
                 break;
             }
         }
 
         let endSample = totalSamples;
-        for (let i = totalSamples - 1; i > Math.max(0, totalSamples - 4000); i--) {
+        for (let i = totalSamples - 1; i > Math.max(0, totalSamples - 6000); i--) {
             if (Math.abs(pcmBuffer.readInt16LE(i * 2)) > threshold) {
-                endSample = Math.min(totalSamples, i + 15);
+                endSample = Math.min(totalSamples, i + 5);
                 break;
             }
         }
 
         const slicedBuffer = pcmBuffer.subarray(startSample * 2, endSample * 2);
 
-        // --- FADE-IN INIZIALE (20ms) ---
-        const fadeSamples = Math.min(320, slicedBuffer.length / 2);
+        // --- FADE-IN RAPIDO (10ms) per evitare click di apertura ---
+        const fadeSamples = Math.min(160, slicedBuffer.length / 2);
         for (let i = 0; i < fadeSamples; i++) {
             const sample = slicedBuffer.readInt16LE(i * 2);
             const multiplier = i / fadeSamples;
             slicedBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // --- CODA DI SILENZIO FINALE ---
-        const silenceBuffer = Buffer.alloc(2400, 0); 
+        // --- CODA DI SILENZIO PULITA ---
+        const silenceBuffer = Buffer.alloc(1600, 0); 
         const finalBuffer = Buffer.concat([slicedBuffer, silenceBuffer]);
 
-        console.log(`[TTS PCM] Pulito senza balbettii: ${finalBuffer.length} byte per: "${text}"`);
+        console.log(`[TTS PCM] Pulito e tagliato: ${finalBuffer.length} byte per: "${text}"`);
         return finalBuffer;
     } catch (err) {
         console.error("[Errore Conversione PCM]", err.message);
@@ -138,7 +138,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 70 // Bilanciato: risposte rapide ma capaci di completare barzellette o spiegazioni
+            max_tokens: 70
         })
     });
 
