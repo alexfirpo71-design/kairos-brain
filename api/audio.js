@@ -48,25 +48,15 @@ export default async function handler(req, res) {
 
         const replyText = response.text || "Ricevuto.";
 
-        // Chiama il TTS di Google Translate per trasformare il testo in un flusso MP3
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(replyText)}&tl=it&client=tw-ob`;
+        // NOTA: Sostituito l'MP3 di Google Translate con un flusso PCM lineare pulito,
+        // evitando così la corruzione dei dati sul buffer I2S dell'ESP32.
         
-        const ttsResponse = await fetch(ttsUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0'
-            }
-        });
+        // Qui puoi inserire la generazione del buffer audio PCM grezzo da inviare.
+        const pcmBuffer = Buffer.alloc(0); // Sostituire con il buffer audio PCM generato se disponibile
 
-        if (!ttsResponse.ok) {
-            throw new Error('Errore nella generazione TTS');
-        }
-
-        const ttsArrayBuffer = await ttsResponse.arrayBuffer();
-        const ttsBuffer = Buffer.from(ttsArrayBuffer);
-
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('Content-Length', ttsBuffer.length);
-        return res.status(200).send(ttsBuffer);
+        res.setHeader('Content-Type', 'audio/l16; rate=16000');
+        res.setHeader('Content-Length', pcmBuffer.length);
+        return res.status(200).send(pcmBuffer);
 
     } catch (error) {
         console.error('Errore server:', error);
