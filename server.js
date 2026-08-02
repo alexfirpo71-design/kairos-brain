@@ -48,8 +48,6 @@ async function getTtsPcmAudio(text) {
         });
 
         const totalSamples = pcmBuffer.length / 2;
-        
-        // --- TAGLIO FISSO DI SICUREZZA (~45ms) ---
         const trimSamples = 720; 
         if (totalSamples <= (trimSamples * 2)) {
             return pcmBuffer;
@@ -57,7 +55,6 @@ async function getTtsPcmAudio(text) {
 
         const slicedBuffer = pcmBuffer.subarray(trimSamples * 2, pcmBuffer.length - (trimSamples * 2));
 
-        // --- FADE-IN FLUIDO (15ms) ---
         const fadeSamples = Math.min(240, slicedBuffer.length / 2);
         for (let i = 0; i < fadeSamples; i++) {
             const sample = slicedBuffer.readInt16LE(i * 2);
@@ -65,11 +62,8 @@ async function getTtsPcmAudio(text) {
             slicedBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // --- CODA DI SILENZIO FINALE ---
         const silenceBuffer = Buffer.alloc(1600, 0); 
-        const finalBuffer = Buffer.concat([slicedBuffer, silenceBuffer]);
-
-        return finalBuffer;
+        return Buffer.concat([slicedBuffer, silenceBuffer]);
     } catch (err) {
         console.error("[Errore Conversione PCM]", err.message);
         return null;
@@ -139,14 +133,11 @@ wss.on('connection', (ws, req) => {
     ws.deviceMac = null;
     ws.userName = "Alessandro";
     ws.deviceContext = "";
-    ws.isProcessing = false; // Flag per evitare sovrapposizioni di richieste
     let audioBuffer = [];
 
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
-            if (!ws.isProcessing) {
-                audioBuffer.push(message);
-            }
+            audioBuffer.push(message);
         } else {
             try {
                 const data = JSON.parse(message.toString());
@@ -157,11 +148,8 @@ wss.on('connection', (ws, req) => {
                     return;
                 }
 
-                if (data.state === 'processing' && !ws.isProcessing) {
-                    ws.isProcessing = true;
+                if (data.state === 'processing') {
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
-                    audioBuffer = []; // Svuota subito il buffer per la sessione successiva
-
                     let replyText = "Ricevuto.";
 
                     try {
@@ -177,24 +165,28 @@ wss.on('connection', (ws, req) => {
 
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
-                    try {
-                        const speechBuffer = await getTtsPcmAudio(replyText);
-                        
-                        if (speechBuffer && speechBuffer.length > 0) {
-                            const chunkSize = 1024;
-                            for (let i = 0; i < speechBuffer.length; i += chunkSize) {
-                                if (ws.readyState !== ws.OPEN) break;
-                                const chunk = speechBuffer.subarray(i, i + chunkSize);
-                                ws.send(chunk);
-                                await new Promise(resolve => setTimeout(resolve, 10));
+                    setTimeout(async () => {
+                        try {
+                            const speechBuffer = await getTtsPcmAudio(replyText);
+                            
+                            if (speechBuffer && speechBuffer.length > 0) {
+                                const chunkSize = 1024;
+                                for (let i = 0; i < speechBuffer.length; i += chunkSize) {
+                                    if (ws.readyState !== ws.OPEN) break;
+                                    const chunk = speechBuffer.subarray(i, i + chunkSize);
+                                    ws.send(chunk);
+                                    await new Promise(resolve => setTimeout(resolve, 10));
+                                }
+                                console.log("[WS] Flusso PCM inviato correttamente.");
+                            } else {
+                                console.log("[WS] Impossibile generare l'audio.");
                             }
-                            console.log("[WS] Flusso PCM inviato correttamente.");
+                        } catch (streamErr) {
+                            console.error("[Errore Streaming Audio]", streamErr);
                         }
-                    } catch (streamErr) {
-                        console.error("[Errore Streaming Audio]", streamErr);
-                    } finally {
-                        ws.isProcessing = false; // Rilascia il blocco per la prossima domanda
-                    }
+                    }, 200);
+
+                    audioBuffer = [];
                 }
             } catch (e) {
                 console.log('[WS Testo]', message.toString());
