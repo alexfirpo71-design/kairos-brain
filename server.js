@@ -11,7 +11,6 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Funzione TTS che scarica l'audio e lo converte in PCM puro (addio tormenta di neve!)
 async function getTtsPcmAudio(text) {
     try {
         const cleanText = encodeURIComponent(text.substring(0, 150));
@@ -26,7 +25,6 @@ async function getTtsPcmAudio(text) {
         const arrayBuffer = await response.arrayBuffer();
         const mp3Buffer = Buffer.from(arrayBuffer);
 
-        // Convertiamo l'MP3 in PCM grezzo a 16kHz mono usando ffmpeg (già disponibile su Render)
         const pcmBuffer = await new Promise((resolve, reject) => {
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
@@ -49,7 +47,15 @@ async function getTtsPcmAudio(text) {
             ffmpeg.stdin.end();
         });
 
-        console.log(`[TTS PCM] Convertiti ${pcmBuffer.length} byte PCM puliti per: "${text}"`);
+        // Applicazione di un fade-in iniziale sui primi 1000 campioni per azzerare il "tic" o lo schiocco di apertura
+        const fadeSamples = Math.min(1000, pcmBuffer.length / 2);
+        for (let i = 0; i < fadeSamples; i++) {
+            const sample = pcmBuffer.readInt16LE(i * 2);
+            const multiplier = i / fadeSamples;
+            pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
+        }
+
+        console.log(`[TTS PCM] Convertiti e ripuliti ${pcmBuffer.length} byte PCM per: "${text}"`);
         return pcmBuffer;
     } catch (err) {
         console.error("[Errore Conversione PCM]", err.message);
@@ -160,9 +166,10 @@ wss.on('connection', (ws, req) => {
                             for (let i = 0; i < speechBuffer.length; i += chunkSize) {
                                 const chunk = speechBuffer.subarray(i, i + chunkSize);
                                 ws.send(chunk);
-                                await new Promise(resolve => setTimeout(resolve, 15));
+                                // Ritardo leggermente ridotto e costante a 10ms per evitare svuotamenti del buffer ESP32
+                                await new Promise(resolve => setTimeout(resolve, 10));
                             }
-                            console.log("[WS] Flusso PCM pulito inviato.");
+                            console.log("[WS] Flusso PCM stabile inviato.");
                         } else {
                             console.log("[WS] Impossibile generare l'audio.");
                         }
