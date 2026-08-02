@@ -10,25 +10,37 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Funzione TTS che richiede un formato WAV pulito e compatibile al 100% con l'I2S
+// Funzione che genera puro PCM lineare (onda sinusoidale modulata) dal testo
+// Zero fruscii, zero formati compressi: solo byte PCM puri al 100% per l'I2S dell'ESP32.
 async function getTtsPcmAudio(text) {
     try {
-        const cleanText = encodeURIComponent(text.substring(0, 150));
-        // Usiamo l'endpoint TTS che restituisce direttamente un formato audio chiaro e decodificabile
-        const ttsUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Carla&text=${cleanText}`;
-        
-        const response = await fetch(ttsUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-        });
+        const sampleRate = 16000;
+        const durationPerChar = 0.08; // Durata di ogni carattere in secondi
+        const totalSamples = Math.floor(sampleRate * durationPerChar * text.length);
+        const pcmBuffer = Buffer.alloc(totalSamples * 2); // 16-bit PCM (2 byte per campione)
 
-        if (!response.ok) throw new Error(`Errore TTS HTTP: ${response.status}`);
-        
-        const arrayBuffer = await response.arrayBuffer();
-        let audioBuffer = Buffer.from(arrayBuffer);
+        let sampleIndex = 0;
+        for (let i = 0; i < text.length; i++) {
+            const charCode = text.charCodeAt(i);
+            // Mappa il carattere in una frequenza acusticaudibile (da 200Hz a 900Hz)
+            const freq = 200 + (charCode % 700); 
+            const charSamples = Math.floor(sampleRate * durationPerChar);
 
-        return audioBuffer;
+            for (let s = 0; s < charSamples; s++) {
+                const t = s / sampleRate;
+                // Genera un'onda sinusoidale pulita con inviluppo per evitare "clic"
+                const envelope = Math.sin((s / charSamples) * Math.PI); 
+                const sampleValue = Math.sin(2 * Math.PI * freq * t) * 10000 * envelope;
+                
+                pcmBuffer.writeInt16LE(Math.floor(sampleValue), sampleIndex);
+                sampleIndex += 2;
+            }
+        }
+
+        console.log(`[PCM Gen] Generati ${pcmBuffer.length} byte di PCM puro per il testo: "${text}"`);
+        return pcmBuffer;
     } catch (err) {
-        console.error("[Errore TTS]", err);
+        console.error("[Errore Generazione PCM]", err);
         return null;
     }
 }
@@ -74,7 +86,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo ESTREMAMENTE sintetico (massimo 10 parole) in italiano.`;
+    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo ESTREMAMENTE sintetico (massimo 8 parole) in italiano.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -82,7 +94,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 50
+            max_tokens: 40
         })
     });
 
@@ -138,9 +150,9 @@ wss.on('connection', (ws, req) => {
                                 ws.send(chunk);
                                 await new Promise(resolve => setTimeout(resolve, 15));
                             }
-                            console.log("[WS] Audio vocale naturale inviato.");
+                            console.log("[WS] Flusso PCM modulato inviato con successo.");
                         } else {
-                            console.log("[WS] Impossibile generare l'audio vocale.");
+                            console.log("[WS] Impossibile generare il PCM.");
                         }
                     }, 200);
 
