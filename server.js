@@ -13,7 +13,8 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 async function getTtsPcmAudio(text) {
     try {
-        const cleanText = encodeURIComponent(text.substring(0, 300));
+        // Tagliamo a 400 caratteri per sicurezza con Google TTS, così regge anche le barzellette
+        const cleanText = encodeURIComponent(text.substring(0, 400));
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
         
         const response = await fetch(ttsUrl, {
@@ -119,7 +120,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 70
+            max_tokens: 300 // <-- Aumentato da 70 a 300 per consentire barzellette e storie complete
         })
     });
 
