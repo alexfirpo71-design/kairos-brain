@@ -10,26 +10,24 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Funzione TTS che scarica un audio pulito da un endpoint vocale standard e lo converte in WAV PCM perfetto
+// Funzione TTS stabile con endpoint alternativo aperto e senza restrizioni 401
 async function getTtsPcmAudio(text) {
     try {
         const cleanText = encodeURIComponent(text.substring(0, 150));
-        // Usiamo un endpoint vocale stabile in italiano (voce naturale)
-        const ttsUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Carla&text=${cleanText}`;
+        // Usiamo un servizio TTS pubblico alternativo stabile per l'italiano
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
         
         const response = await fetch(ttsUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
 
         if (!response.ok) throw new Error(`Errore TTS HTTP: ${response.status}`);
         
         const arrayBuffer = await response.arrayBuffer();
-        let rawBuffer = Buffer.from(arrayBuffer);
+        let audioBuffer = Buffer.from(arrayBuffer);
 
-        // Se l'audio ricevuto è un MP3 o un flusso compresso, lo incaselliamo o restituiamo i byte grezzi 
-        // ma puliti da intestazioni errate. Per l'ESP32, passiamo i dati audio normalizzati.
-        console.log(`[TTS] Scaricati ${rawBuffer.length} byte audio per: "${text}"`);
-        return rawBuffer;
+        console.log(`[TTS] Scaricati ${audioBuffer.length} byte audio per: "${text}"`);
+        return audioBuffer;
     } catch (err) {
         console.error("[Errore TTS]", err);
         return null;
@@ -141,7 +139,7 @@ wss.on('connection', (ws, req) => {
                                 ws.send(chunk);
                                 await new Promise(resolve => setTimeout(resolve, 15));
                             }
-                            console.log("[WS] Flusso audio inviato.");
+                            console.log("[WS] Audio inviato con successo.");
                         } else {
                             console.log("[WS] Impossibile generare l'audio.");
                         }
