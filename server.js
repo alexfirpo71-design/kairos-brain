@@ -80,7 +80,7 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        // Fade-in iniziale
+        // Fade-in iniziale pulito
         const fadeSamplesIn = Math.min(240, pcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = pcmBuffer.readInt16LE(i * 2);
@@ -88,8 +88,8 @@ async function getSingleTtsPcm(textChunk) {
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // Fade-out finale aggressivo per azzerare completamente la fine
-        const fadeSamplesOut = Math.min(480, pcmBuffer.length / 2);
+        // Fade-out finale profondo per azzerare la voce prima della chiusura
+        const fadeSamplesOut = Math.min(960, pcmBuffer.length / 2);
         const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
             const idx = (startOutIdx + i) * 2;
@@ -207,7 +207,7 @@ wss.on('connection', (ws, req) => {
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 180);
                         
-                        // Silenzio iniziale pulito
+                        // Silenzio iniziale
                         ws.send(Buffer.alloc(400, 0));
 
                         for (let chunk of textChunks) {
@@ -224,10 +224,10 @@ wss.on('connection', (ws, req) => {
                             }
                         }
 
-                        // Coda di chiusura con extra silenzio per azzerare l'eco finale
-                        ws.send(Buffer.alloc(3200, 0));
+                        // Coda di chiusura allargata per forzare lo svuotamento del buffer
+                        ws.send(Buffer.alloc(4800, 0));
 
-                        console.log("[WS] Streaming audio completato senza eco.");
+                        console.log("[WS] Streaming audio completato.");
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
                     }
