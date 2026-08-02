@@ -13,8 +13,6 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 async function getTtsPcmAudio(text) {
     try {
-        // SICUREZZA GOOGLE TTS: Google accetta massimo ~200 caratteri per chiamata.
-        // Se il testo è più lungo, prendiamo i primi 190 caratteri per evitare il blocco totale.
         const safeText = text.length > 190 ? text.substring(0, 190) + "..." : text;
         const cleanText = encodeURIComponent(safeText);
         
@@ -51,23 +49,9 @@ async function getTtsPcmAudio(text) {
             ffmpeg.stdin.end();
         });
 
-        const totalSamples = pcmBuffer.length / 2;
-        const trimSamples = 720; 
-        if (totalSamples <= (trimSamples * 2)) {
-            return pcmBuffer;
-        }
-
-        const slicedBuffer = pcmBuffer.subarray(trimSamples * 2, pcmBuffer.length - (trimSamples * 2));
-
-        const fadeSamples = Math.min(240, slicedBuffer.length / 2);
-        for (let i = 0; i < fadeSamples; i++) {
-            const sample = slicedBuffer.readInt16LE(i * 2);
-            const multiplier = i / fadeSamples;
-            slicedBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
-        }
-
+        // Restituiamo il buffer PCM diretto senza tagli che mangiano le prime sillabe
         const silenceBuffer = Buffer.alloc(1600, 0); 
-        return Buffer.concat([slicedBuffer, silenceBuffer]);
+        return Buffer.concat([pcmBuffer, silenceBuffer]);
     } catch (err) {
         console.error("[Errore Conversione PCM]", err.message);
         return null;
@@ -123,7 +107,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 150 // Lunghezza bilanciata per argomentare senza superare i limiti audio
+            max_tokens: 150
         })
     });
 
