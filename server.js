@@ -185,7 +185,7 @@ wss.on('connection', (ws, req) => {
 
                 if (data.state === 'processing') {
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
-                    audioBuffer = []; // Svuotiamo subito il buffer per liberare memoria
+                    audioBuffer = []; // Svuotiamo subito il buffer
 
                     let replyText = "Ricevuto.";
                     try {
@@ -200,16 +200,13 @@ wss.on('connection', (ws, req) => {
                         replyText = "Si è verificato un errore di elaborazione.";
                     }
 
-                    // Notifica subito l'ESP32 che il testo è pronto
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
-                    // Streaming sequenziale ultra-reattivo frase per frase
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 180);
                         
-                        // Invia un piccolo silenzio iniziale
-                        const initialSilence = Buffer.alloc(400, 0);
-                        ws.send(initialSilence);
+                        // Silenzio iniziale
+                        ws.send(Buffer.alloc(400, 0));
 
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN) break;
@@ -219,13 +216,16 @@ wss.on('connection', (ws, req) => {
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
-                                    await new Promise(resolve => setTimeout(resolve, 5)); // Invio fulmineo
+                                    await new Promise(resolve => setTimeout(resolve, 5));
                                 }
-                                // Brevissima pausa naturale tra i chunk di testo
                                 ws.send(Buffer.alloc(200, 0));
                             }
                         }
-                        console.log("[WS] Streaming audio completato con successo.");
+
+                        // Coda di chiusura antiblocco I2S
+                        ws.send(Buffer.alloc(2400, 0));
+
+                        console.log("[WS] Streaming audio completato e chiuso pulito.");
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
                     }
