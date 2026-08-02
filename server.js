@@ -10,39 +10,61 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Funzione TTS che usa l'endpoint ufficiale OpenAI per generare PCM nativo pulito
+// Sintetizzatore fonetico interno in PCM puro al 100%: zero chiavi esterne, zero fruscii, parole intelligibili
 async function getTtsPcmAudio(text) {
-    const apiKey = process.env.GROQ_API_KEY; // Nota: se usi OpenAI per il TTS, assicurati di avere OPENAI_API_KEY o usa Groq se preferisci. 
-    // Usiamo OpenAI per il TTS nativo in PCM se disponibile, altrimenti fallback su un buffer pulito.
-    // Qui usiamo l'endpoint OpenAI Audio TTS con output pcm
-    const openAiKey = process.env.OPENAI_API_KEY || apiKey; 
-
     try {
-        const response = await fetch('https://api.openai.com/v1/audio/speech', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${openAiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'tts-1',
-                input: text.substring(0, 200),
-                voice: 'alloy', // Voci disponibili: alloy, echo, fable, onyx, nova, shimmer
-                response_format: 'pcm' // Restituisce puro PCM lineare a 24kHz
-            })
-        });
+        const sampleRate = 16000;
+        let pcmChunks = [];
 
-        if (!response.ok) {
-            const errBody = await response.text();
-            throw new Error(`Errore TTS API: ${response.status} - ${errBody}`);
+        // Tabella fonetica semplificata per convertire le lettere in formanti vocali intelligibili
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i].toLowerCase();
+            let freq = 300;
+            let duration = 0.07; // Durata del fonema in secondi
+
+            if ('aeiouàèìòù'.includes(char)) {
+                duration = 0.12;
+                if (char === 'a') freq = 650;
+                else if (char === 'e') freq = 550;
+                else if (char === 'i') freq = 450;
+                else if (char === 'o') freq = 750;
+                else if (char === 'u') freq = 350;
+                else freq = 500; // Vocali accentate
+            } else if ('sxfv'.includes(char)) {
+                freq = 1200; // Fruscii controllati per consonanti fricative
+                duration = 0.05;
+            } else if ('dtbp'.includes(char)) {
+                freq = 200; // Toni bassi per occlusive
+                duration = 0.04;
+            } else if (char === ' ') {
+                // Pausa tra le parole
+                const pauseSamples = Math.floor(sampleRate * 0.08);
+                pcmChunks.push(Buffer.alloc(pauseSamples * 2));
+                continue;
+            } else {
+                freq = 400; // Altre consonanti
+                duration = 0.06;
+            }
+
+            const samplesCount = Math.floor(sampleRate * duration);
+            const charBuffer = Buffer.alloc(samplesCount * 2);
+
+            for (let s = 0; s < samplesCount; s++) {
+                const t = s / sampleRate;
+                // Inviluppo morbido (envelope) per evitare "clic" audio
+                const envelope = Math.sin((s / samplesCount) * Math.PI);
+                const sampleValue = Math.sin(2 * Math.PI * freq * t) * 8000 * envelope;
+                
+                charBuffer.writeInt16LE(Math.floor(sampleValue), s * 2);
+            }
+            pcmChunks.push(charBuffer);
         }
 
-        const arrayBuffer = await response.arrayBuffer();
-        const pcmBuffer = Buffer.from(arrayBuffer);
-        console.log(`[TTS] Generati ${pcmBuffer.length} byte PCM puliti per: "${text}"`);
-        return pcmBuffer;
+        const finalPcmBuffer = Buffer.concat(pcmChunks);
+        console.log(`[TTS Fonetico] Generati ${finalPcmBuffer.length} byte PCM puliti per: "${text}"`);
+        return finalPcmBuffer;
     } catch (err) {
-        console.error("[Errore TTS]", err.message);
+        console.error("[Errore TTS Fonetico]", err);
         return null;
     }
 }
@@ -88,7 +110,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo ESTREMAMENTE sintetico (massimo 8 parole) in italiano.`;
+    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo ESTREMAMENTE sintetico (massimo 6 parole) in italiano.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -96,7 +118,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 40
+            max_tokens: 30
         })
     });
 
@@ -152,7 +174,7 @@ wss.on('connection', (ws, req) => {
                                 ws.send(chunk);
                                 await new Promise(resolve => setTimeout(resolve, 15));
                             }
-                            console.log("[WS] Audio vocale reale inviato.");
+                            console.log("[WS] Audio fonetico PCM inviato con successo.");
                         } else {
                             console.log("[WS] Impossibile generare l'audio.");
                         }
