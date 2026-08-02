@@ -39,20 +39,6 @@ function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSamp
     return Buffer.concat([header, audioBuffer]);
 }
 
-// Funzione per generare un tono PCM grezzo di test (440 Hz)
-function generatePcmBeep(durationMs = 1500, sampleRate = 16000) {
-    const numSamples = (sampleRate * durationMs) / 1000;
-    const buffer = Buffer.alloc(numSamples * 2);
-    const frequency = 440;
-
-    for (let i = 0; i < numSamples; i++) {
-        const t = i / sampleRate;
-        const sample = Math.sin(2 * Math.PI * frequency * t) * 10000;
-        buffer.writeInt16LE(Math.round(sample), i * 2);
-    }
-    return buffer;
-}
-
 // Funzione per inviare l'audio a Groq Whisper API
 async function transcribeAudio(audioBuffer) {
     const apiKey = process.env.GROQ_API_KEY;
@@ -94,7 +80,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
 
     const systemPrompt = `Sei Kairós, un assistente IA vocale avanzato integrato in un dispositivo hardware ESP32-S3 (Freenove). Stai parlando con ${userName}, un perito elettronico e sviluppatore che vive a Valbrevenna. 
 Stato e contesto tecnico attuale del progetto su cui state lavorando in tempo reale: "${deviceContext || 'Nessun dettaglio aggiuntivo.'}"
-Rispondi in modo diretto, brillante, amichevole, tecnico e competente in lingua italiana, tenendo sempre a mente i progressi hardware fatti.`;
+Rispondi in modo diretto, brillante, amichevole, tecnico e competente in lingua italiana, tenendo sempre a mente i progressi hardware fatti. Sii sintetico (massimo 2 frasi) per facilitare la sintesi vocale.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -108,7 +94,7 @@ Rispondi in modo diretto, brillante, amichevole, tecnico e competente in lingua 
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userText }
             ],
-            max_tokens: 200
+            max_tokens: 150
         })
     });
 
@@ -119,6 +105,40 @@ Rispondi in modo diretto, brillante, amichevole, tecnico e competente in lingua 
 
     const data = await response.json();
     return data.choices[0].message.content;
+}
+
+// Funzione per generare l'audio parlato (TTS) tramite le API di Groq
+async function textToSpeech(text) {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+        throw new Error("GROQ_API_KEY non configurata.");
+    }
+
+    const response = await fetch('https://api.groq.com/openai/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            model: 'canopylabs/orpheus-v1-english', // Modello TTS ufficiale su Groq
+            input: text,
+            voice: 'austin', // Voce maschile pulita
+            response_format: 'wav'
+        })
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Errore Groq TTS: ${response.status} - ${errText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const fullWavBuffer = Buffer.from(arrayBuffer);
+
+    // Tagliamo l'intestazione WAV (solitamente i primi 44 byte) per inviare all'ESP32 solo i campioni PCM puri che si aspettava
+    const pcmDataOnly = fullWavBuffer.subarray(44);
+    return pcmDataOnly;
 }
 
 wss.on('connection', (ws, req) => {
@@ -177,12 +197,18 @@ wss.on('connection', (ws, req) => {
 
                     ws.send(responsePayload);
 
-                    // Invio dell'audio PCM grezzo di test (o futuro TTS) direttamente all'ESP32
-                    setTimeout(() => {
-                        const pcmAudioBuffer = generatePcmBeep(2000);
-                        ws.send(pcmAudioBuffer);
-                        console.log("[WS] Inviati byte audio PCM binari all'ESP32.");
-                    }, 100);
+                    // Generazione e invio della voce reale tramite TTS di Groq
+                    try {
+                        console.log("[Groq TTS] Conversione testo in voce...");
+                        const ttsAudioBuffer = await textToSpeech(replyText);
+                        
+                        setTimeout(() => {
+                            ws.send(ttsAudioBuffer);
+                            console.log("[WS] Inviati dati audio vocali binari all'ESP32.");
+                        }, 100);
+                    } catch (ttsError) {
+                        console.error("[Groq TTS] Errore nella sintesi vocale:", ttsError);
+                    }
 
                     audioBuffer = [];
                 }
