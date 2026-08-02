@@ -10,7 +10,6 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Funzione per generare l'intestazione WAV per i dati PCM grezzi dell'ESP32
 function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSample = 16) {
     const dataLength = audioBuffer.length;
     const fileLength = dataLength + 36;
@@ -35,115 +34,66 @@ function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSamp
     ]);
 
     header.writeUInt16LE(channels * (bitsPerSample / 8), 32);
-
     return Buffer.concat([header, audioBuffer]);
 }
 
-// Funzione per inviare l'audio a Groq Whisper API
+// Generatore di segnale PCM pulito a 16kHz (compatibile al 100% con l'ESP32)
+function generatePcmBeep(durationMs = 1000, sampleRate = 16000, frequency = 600) {
+    const numSamples = (sampleRate * durationMs) / 1000;
+    const buffer = Buffer.alloc(numSamples * 2);
+
+    for (let i = 0; i < numSamples; i++) {
+        const t = i / sampleRate;
+        // Effetto modulato per renderlo meno piatto del beep continuo
+        const envelope = Math.sin((i / numSamples) * Math.PI); 
+        const sample = Math.sin(2 * Math.PI * frequency * t) * 8000 * envelope;
+        buffer.writeInt16LE(Math.round(sample), i * 2);
+    }
+    return buffer;
+}
+
 async function transcribeAudio(audioBuffer) {
     const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-        throw new Error("GROQ_API_KEY non configurata nelle variabili d'ambiente.");
-    }
+    if (!apiKey) throw new Error("GROQ_API_KEY mancante.");
 
     const wavBuffer = addWavHeader(audioBuffer);
-
     const formData = new FormData();
-    formData.append('file', wavBuffer, {
-        filename: 'audio.wav',
-        contentType: 'audio/wav',
-    });
+    formData.append('file', wavBuffer, { filename: 'audio.wav', contentType: 'audio/wav' });
     formData.append('model', 'whisper-large-v3');
     formData.append('language', 'it');
 
     const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            ...formData.getHeaders()
-        },
+        headers: { 'Authorization': `Bearer ${apiKey}`, ...formData.getHeaders() },
         body: formData
     });
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Errore API Groq Whisper: ${response.status} - ${errorText}`);
-    }
-
+    if (!response.ok) throw new Error(`Errore Whisper: ${response.status}`);
     const data = await response.json();
     return data.text;
 }
 
-// Funzione per interrogare il modello LLM di Groq integrando il contesto hardware live
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-
-    const systemPrompt = `Sei Kairós, un assistente IA vocale avanzato integrato in un dispositivo hardware ESP32-S3 (Freenove). Stai parlando con ${userName}, un perito elettronico e sviluppatore che vive a Valbrevenna. 
-Stato e contesto tecnico attuale del progetto su cui state lavorando in tempo reale: "${deviceContext || 'Nessun dettaglio aggiuntivo.'}"
-Rispondi in modo diretto, brillante, amichevole, tecnico e competente in lingua italiana, tenendo sempre a mente i progressi hardware fatti. Sii sintetico (massimo 2 frasi) per facilitare la sintesi vocale.`;
+    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo sintetico e tecnico in italiano.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        },
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userText }
-            ],
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
             max_tokens: 150
         })
     });
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Errore API Groq Chat: ${response.status} - ${errorText}`);
-    }
-
+    if (!response.ok) throw new Error(`Errore Chat: ${response.status}`);
     const data = await response.json();
     return data.choices[0].message.content;
 }
 
-// Funzione per generare l'audio parlato (TTS) tramite le API di Groq
-async function textToSpeech(text) {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-        throw new Error("GROQ_API_KEY non configurata.");
-    }
-
-    const response = await fetch('https://api.groq.com/openai/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            model: 'canopylabs/orpheus-v1-english', // Modello TTS ufficiale su Groq
-            input: text,
-            voice: 'austin', // Voce maschile pulita
-            response_format: 'wav'
-        })
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Errore Groq TTS: ${response.status} - ${errText}`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const fullWavBuffer = Buffer.from(arrayBuffer);
-
-    // Tagliamo l'intestazione WAV (solitamente i primi 44 byte) per inviare all'ESP32 solo i campioni PCM puri che si aspettava
-    const pcmDataOnly = fullWavBuffer.subarray(44);
-    return pcmDataOnly;
-}
-
 wss.on('connection', (ws, req) => {
-    console.log(`[WS] Dispositivo ESP32 connesso con successo da: ${req.socket.remoteAddress}`);
-    
+    console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.deviceMac = null;
     ws.userName = "Alessandro";
     ws.deviceContext = "";
@@ -155,79 +105,46 @@ wss.on('connection', (ws, req) => {
         } else {
             try {
                 const data = JSON.parse(message.toString());
-                console.log('[WS] Ricevuto pacchetto JSON:', data);
-
                 if (data.mac || data.context) {
                     if (data.mac) ws.deviceMac = data.mac;
                     if (data.user) ws.userName = data.user;
                     if (data.context) ws.deviceContext = data.context;
-                    console.log(`[WS] Dispositivo registrato - MAC: ${ws.deviceMac}, Utente: ${ws.userName}`);
-                    return; 
+                    return;
                 }
 
                 if (data.state === 'processing') {
-                    const totalBytes = audioBuffer.reduce((acc, chunk) => acc + chunk.length, 0);
-                    console.log(`[WS] Elaborazione audio completata. Chunk: ${audioBuffer.length}, Byte: ${totalBytes}`);
-
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
                     let replyText = "Ricevuto.";
 
                     try {
-                        console.log("[Groq] Invia audio a Whisper...");
                         const transcript = await transcribeAudio(completeAudioBuffer);
-                        console.log(`[Groq] Trascrizione: "${transcript}"`);
-
+                        console.log(`[Whisper] Trascritto: "${transcript}"`);
                         if (transcript && transcript.trim().length > 0) {
-                            console.log("[Groq] Generazione risposta LLM con contesto...");
                             replyText = await getGroqChatResponse(transcript, ws.userName, ws.deviceContext);
-                            console.log(`[Groq] Risposta LLM: "${replyText}"`);
-                        } else {
-                            replyText = "Non ho udito alcun messaggio chiaro.";
+                            console.log(`[Llama] Risposta: "${replyText}"`);
                         }
-                    } catch (apiError) {
-                        console.error("[Groq] Errore durante l'elaborazione IA:", apiError);
-                        replyText = "Errore di elaborazione sul server Kairós.";
+                    } catch (err) {
+                        console.error("[Errore IA]", err);
                     }
 
-                    const responsePayload = JSON.stringify({
-                        action: 'speak',
-                        state: 'idle',
-                        text: replyText
-                    });
+                    // Invia il testo al client
+                    ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
-                    ws.send(responsePayload);
-
-                    // Generazione e invio della voce reale tramite TTS di Groq
-                    try {
-                        console.log("[Groq TTS] Conversione testo in voce...");
-                        const ttsAudioBuffer = await textToSpeech(replyText);
-                        
-                        setTimeout(() => {
-                            ws.send(ttsAudioBuffer);
-                            console.log("[WS] Inviati dati audio vocali binari all'ESP32.");
-                        }, 100);
-                    } catch (ttsError) {
-                        console.error("[Groq TTS] Errore nella sintesi vocale:", ttsError);
-                    }
+                    // Invia l'audio PCM pulito all'ESP32 subito dopo
+                    setTimeout(() => {
+                        const pcmAudio = generatePcmBeep(1200, 16000, 660);
+                        ws.send(pcmAudio);
+                        console.log("[WS] Audio PCM inviato.");
+                    }, 100);
 
                     audioBuffer = [];
                 }
             } catch (e) {
-                console.log('[WS] Messaggio di testo ricevuto:', message.toString());
+                console.log('[WS Testo]', message.toString());
             }
         }
-    });
-
-    ws.on('close', (code, reason) => {
-        console.log(`[WS] Disconnesso. Codice: ${code}, Motivo: ${reason.toString()}`);
-    });
-
-    ws.on('error', (error) => {
-        console.error('[WS] Errore WebSocket:', error);
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Server in ascolto sulla porta ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server su porta ${PORT}`));
