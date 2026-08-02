@@ -47,41 +47,30 @@ async function getTtsPcmAudio(text) {
             ffmpeg.stdin.end();
         });
 
-        // --- TAGLIO AGGRESSIVO DEL METRONOMO / TICCHETTO INIZIALE ---
         const totalSamples = pcmBuffer.length / 2;
-        const threshold = 400; // Soglia per saltare fruscii e click iniziali
+        
+        // --- TAGLIO FISSO DI SICUREZZA (Elimina i primi e ultimi ~45ms di fruscio/ticchettio) ---
+        const trimSamples = 720; 
 
-        let startSample = 0;
-        for (let i = 0; i < Math.min(totalSamples, 6000); i++) {
-            if (Math.abs(pcmBuffer.readInt16LE(i * 2)) > threshold) {
-                startSample = Math.max(0, i - 5);
-                break;
-            }
+        if (totalSamples <= (trimSamples * 2)) {
+            return pcmBuffer;
         }
 
-        let endSample = totalSamples;
-        for (let i = totalSamples - 1; i > Math.max(0, totalSamples - 6000); i--) {
-            if (Math.abs(pcmBuffer.readInt16LE(i * 2)) > threshold) {
-                endSample = Math.min(totalSamples, i + 5);
-                break;
-            }
-        }
+        const slicedBuffer = pcmBuffer.subarray(trimSamples * 2, pcmBuffer.length - (trimSamples * 2));
 
-        const slicedBuffer = pcmBuffer.subarray(startSample * 2, endSample * 2);
-
-        // --- FADE-IN RAPIDO (10ms) per evitare click di apertura ---
-        const fadeSamples = Math.min(160, slicedBuffer.length / 2);
+        // --- FADE-IN FLUIDO (15ms) per agganciare la voce senza alcuno scatto ---
+        const fadeSamples = Math.min(240, slicedBuffer.length / 2);
         for (let i = 0; i < fadeSamples; i++) {
             const sample = slicedBuffer.readInt16LE(i * 2);
             const multiplier = i / fadeSamples;
             slicedBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // --- CODA DI SILENZIO PULITA ---
+        // --- CODA DI SILENZIO FINALE PULITA ---
         const silenceBuffer = Buffer.alloc(1600, 0); 
         const finalBuffer = Buffer.concat([slicedBuffer, silenceBuffer]);
 
-        console.log(`[TTS PCM] Pulito e tagliato: ${finalBuffer.length} byte per: "${text}"`);
+        console.log(`[TTS PCM] Taglio fisso applicato: ${finalBuffer.length} byte per: "${text}"`);
         return finalBuffer;
     } catch (err) {
         console.error("[Errore Conversione PCM]", err.message);
