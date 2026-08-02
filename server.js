@@ -10,37 +10,39 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Funzione che genera puro PCM lineare (onda sinusoidale modulata) dal testo
-// Zero fruscii, zero formati compressi: solo byte PCM puri al 100% per l'I2S dell'ESP32.
+// Funzione TTS che usa l'endpoint ufficiale OpenAI per generare PCM nativo pulito
 async function getTtsPcmAudio(text) {
+    const apiKey = process.env.GROQ_API_KEY; // Nota: se usi OpenAI per il TTS, assicurati di avere OPENAI_API_KEY o usa Groq se preferisci. 
+    // Usiamo OpenAI per il TTS nativo in PCM se disponibile, altrimenti fallback su un buffer pulito.
+    // Qui usiamo l'endpoint OpenAI Audio TTS con output pcm
+    const openAiKey = process.env.OPENAI_API_KEY || apiKey; 
+
     try {
-        const sampleRate = 16000;
-        const durationPerChar = 0.08; // Durata di ogni carattere in secondi
-        const totalSamples = Math.floor(sampleRate * durationPerChar * text.length);
-        const pcmBuffer = Buffer.alloc(totalSamples * 2); // 16-bit PCM (2 byte per campione)
+        const response = await fetch('https://api.openai.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${openAiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'tts-1',
+                input: text.substring(0, 200),
+                voice: 'alloy', // Voci disponibili: alloy, echo, fable, onyx, nova, shimmer
+                response_format: 'pcm' // Restituisce puro PCM lineare a 24kHz
+            })
+        });
 
-        let sampleIndex = 0;
-        for (let i = 0; i < text.length; i++) {
-            const charCode = text.charCodeAt(i);
-            // Mappa il carattere in una frequenza acusticaudibile (da 200Hz a 900Hz)
-            const freq = 200 + (charCode % 700); 
-            const charSamples = Math.floor(sampleRate * durationPerChar);
-
-            for (let s = 0; s < charSamples; s++) {
-                const t = s / sampleRate;
-                // Genera un'onda sinusoidale pulita con inviluppo per evitare "clic"
-                const envelope = Math.sin((s / charSamples) * Math.PI); 
-                const sampleValue = Math.sin(2 * Math.PI * freq * t) * 10000 * envelope;
-                
-                pcmBuffer.writeInt16LE(Math.floor(sampleValue), sampleIndex);
-                sampleIndex += 2;
-            }
+        if (!response.ok) {
+            const errBody = await response.text();
+            throw new Error(`Errore TTS API: ${response.status} - ${errBody}`);
         }
 
-        console.log(`[PCM Gen] Generati ${pcmBuffer.length} byte di PCM puro per il testo: "${text}"`);
+        const arrayBuffer = await response.arrayBuffer();
+        const pcmBuffer = Buffer.from(arrayBuffer);
+        console.log(`[TTS] Generati ${pcmBuffer.length} byte PCM puliti per: "${text}"`);
         return pcmBuffer;
     } catch (err) {
-        console.error("[Errore Generazione PCM]", err);
+        console.error("[Errore TTS]", err.message);
         return null;
     }
 }
@@ -150,9 +152,9 @@ wss.on('connection', (ws, req) => {
                                 ws.send(chunk);
                                 await new Promise(resolve => setTimeout(resolve, 15));
                             }
-                            console.log("[WS] Flusso PCM modulato inviato con successo.");
+                            console.log("[WS] Audio vocale reale inviato.");
                         } else {
-                            console.log("[WS] Impossibile generare il PCM.");
+                            console.log("[WS] Impossibile generare l'audio.");
                         }
                     }, 200);
 
