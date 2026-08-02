@@ -2,6 +2,7 @@ import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
+import { spawn } from 'child_process';
 
 const server = createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -10,11 +11,10 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Funzione TTS stabile con endpoint alternativo aperto e senza restrizioni 401
+// Funzione TTS che scarica l'audio e lo converte in PCM puro (addio tormenta di neve!)
 async function getTtsPcmAudio(text) {
     try {
         const cleanText = encodeURIComponent(text.substring(0, 150));
-        // Usiamo un servizio TTS pubblico alternativo stabile per l'italiano
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
         
         const response = await fetch(ttsUrl, {
@@ -24,12 +24,35 @@ async function getTtsPcmAudio(text) {
         if (!response.ok) throw new Error(`Errore TTS HTTP: ${response.status}`);
         
         const arrayBuffer = await response.arrayBuffer();
-        let audioBuffer = Buffer.from(arrayBuffer);
+        const mp3Buffer = Buffer.from(arrayBuffer);
 
-        console.log(`[TTS] Scaricati ${audioBuffer.length} byte audio per: "${text}"`);
-        return audioBuffer;
+        // Convertiamo l'MP3 in PCM grezzo a 16kHz mono usando ffmpeg (già disponibile su Render)
+        const pcmBuffer = await new Promise((resolve, reject) => {
+            const ffmpeg = spawn('ffmpeg', [
+                '-i', 'pipe:0',
+                '-f', 's16le',
+                '-acodec', 'pcm_s16le',
+                '-ac', '1',
+                '-ar', '16000',
+                'pipe:1'
+            ]);
+
+            let chunks = [];
+            ffmpeg.stdout.on('data', chunk => chunks.push(chunk));
+            ffmpeg.on('close', code => {
+                if (code === 0) resolve(Buffer.concat(chunks));
+                else reject(new Error(`FFmpeg exited with code ${code}`));
+            });
+            ffmpeg.on('error', err => reject(err));
+
+            ffmpeg.stdin.write(mp3Buffer);
+            ffmpeg.stdin.end();
+        });
+
+        console.log(`[TTS PCM] Convertiti ${pcmBuffer.length} byte PCM puliti per: "${text}"`);
+        return pcmBuffer;
     } catch (err) {
-        console.error("[Errore TTS]", err);
+        console.error("[Errore Conversione PCM]", err.message);
         return null;
     }
 }
@@ -139,7 +162,7 @@ wss.on('connection', (ws, req) => {
                                 ws.send(chunk);
                                 await new Promise(resolve => setTimeout(resolve, 15));
                             }
-                            console.log("[WS] Audio inviato con successo.");
+                            console.log("[WS] Flusso PCM pulito inviato.");
                         } else {
                             console.log("[WS] Impossibile generare l'audio.");
                         }
