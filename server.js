@@ -37,14 +37,13 @@ function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSamp
     return Buffer.concat([header, audioBuffer]);
 }
 
-// Generatore di segnale PCM pulito a 16kHz (compatibile al 100% con l'ESP32)
-function generatePcmBeep(durationMs = 1000, sampleRate = 16000, frequency = 600) {
+// Generatore di segnale PCM pulito a 16kHz con effetto modulato ("din-din-din")
+function generatePcmBeep(durationMs = 1200, sampleRate = 16000, frequency = 660) {
     const numSamples = (sampleRate * durationMs) / 1000;
     const buffer = Buffer.alloc(numSamples * 2);
 
     for (let i = 0; i < numSamples; i++) {
         const t = i / sampleRate;
-        // Effetto modulato per renderlo meno piatto del beep continuo
         const envelope = Math.sin((i / numSamples) * Math.PI); 
         const sample = Math.sin(2 * Math.PI * frequency * t) * 8000 * envelope;
         buffer.writeInt16LE(Math.round(sample), i * 2);
@@ -130,11 +129,18 @@ wss.on('connection', (ws, req) => {
                     // Invia il testo al client
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
-                    // Invia l'audio PCM pulito all'ESP32 subito dopo
-                    setTimeout(() => {
+                    // Invia l'audio PCM a blocchi fluidi all'ESP32 subito dopo
+                    setTimeout(async () => {
                         const pcmAudio = generatePcmBeep(1200, 16000, 660);
-                        ws.send(pcmAudio);
-                        console.log("[WS] Audio PCM inviato.");
+                        
+                        const chunkSize = 1024;
+                        for (let i = 0; i < pcmAudio.length; i += chunkSize) {
+                            const chunk = pcmAudio.subarray(i, i + chunkSize);
+                            ws.send(chunk);
+                            await new Promise(resolve => setTimeout(resolve, 15));
+                        }
+                        
+                        console.log("[WS] Audio PCM inviato a blocchi.");
                     }, 100);
 
                     audioBuffer = [];
