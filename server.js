@@ -80,7 +80,6 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        // Fade-in iniziale pulito
         const fadeSamplesIn = Math.min(240, pcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = pcmBuffer.readInt16LE(i * 2);
@@ -88,7 +87,6 @@ async function getSingleTtsPcm(textChunk) {
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // Fade-out finale profondo per azzerare la voce prima della chiusura
         const fadeSamplesOut = Math.min(960, pcmBuffer.length / 2);
         const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
@@ -112,10 +110,10 @@ async function transcribeAudio(audioBuffer) {
     const dataLength = audioBuffer.length;
     const fileLength = dataLength + 36;
     const header = Buffer.from([
-        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        0x52, 0x49, 0x46, 0x46,
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
-        0x57, 0x41, 0x56, 0x45, // "WAVE"
-        0x66, 0x6d, 0x74, 0x20, // "fmt "
+        0x57, 0x41, 0x56, 0x45,
+        0x66, 0x6d, 0x74, 0x20,
         16, 0, 0, 0,            
         1, 0,                   
         1, 0,                   
@@ -123,7 +121,7 @@ async function transcribeAudio(audioBuffer) {
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
         2, 0,                   
         16, 0,                  
-        0x64, 0x61, 0x74, 0x61, // "data"
+        0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
     const wavBuffer = Buffer.concat([header, audioBuffer]);
@@ -136,7 +134,7 @@ async function transcribeAudio(audioBuffer) {
     const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, ...formData.getHeaders() },
-        body: formData
+        body: wavBuffer
     });
 
     if (!response.ok) throw new Error(`Errore Whisper: ${response.status}`);
@@ -207,7 +205,6 @@ wss.on('connection', (ws, req) => {
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 180);
                         
-                        // Silenzio iniziale
                         ws.send(Buffer.alloc(400, 0));
 
                         for (let chunk of textChunks) {
@@ -223,9 +220,6 @@ wss.on('connection', (ws, req) => {
                                 ws.send(Buffer.alloc(200, 0));
                             }
                         }
-
-                        // Coda di chiusura allargata per forzare lo svuotamento del buffer
-                        ws.send(Buffer.alloc(4800, 0));
 
                         console.log("[WS] Streaming audio completato.");
                     } catch (streamErr) {
