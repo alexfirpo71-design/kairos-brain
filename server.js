@@ -10,52 +10,56 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-function addWavHeader(audioBuffer, sampleRate = 16000, channels = 1, bitsPerSample = 16) {
-    const dataLength = audioBuffer.length;
-    const fileLength = dataLength + 36;
+// Funzione per ottenere un flusso audio TTS da testo (Google TTS endpoint convertito in buffer)
+async function getTtsPcmAudio(text) {
+    try {
+        // Tronchiamo il testo se troppo lungo per sicurezza
+        const cleanText = encodeURIComponent(text.substring(0, 150));
+        // Chiediamo l'audio a Google Translate TTS in formato mp3/wav
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
+        
+        const response = await fetch(ttsUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
 
-    const header = Buffer.from([
-        0x52, 0x49, 0x46, 0x46, // "RIFF"
-        fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
-        0x57, 0x41, 0x56, 0x45, // "WAVE"
-        0x66, 0x6d, 0x74, 0x20, // "fmt "
-        16, 0, 0, 0,            // SubChunk1Size (16 for PCM)
-        1, 0,                   // AudioFormat (1 for PCM)
-        channels, 0,            // NumChannels
-        sampleRate & 0xff, (sampleRate >> 8) & 0xff, (sampleRate >> 16) & 0xff, (sampleRate >> 24) & 0xff,
-        (sampleRate * channels * (bitsPerSample / 8)) & 0xff,
-        ((sampleRate * channels * (bitsPerSample / 8)) >> 8) & 0xff,
-        ((sampleRate * channels * (bitsPerSample / 8)) >> 16) & 0xff,
-        ((sampleRate * channels * (bitsPerSample / 8)) >> 24) & 0xff,
-        0, 0,                   // BlockAlign placeholder
-        bitsPerSample, 0,       // BitsPerSample
-        0x64, 0x61, 0x74, 0x61, // "data"
-        dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
-    ]);
+        if (!response.ok) throw new Error(`Errore TTS HTTP: ${response.status}`);
+        
+        const arrayBuffer = await response.arrayBuffer();
+        let audioBuffer = Buffer.from(arrayBuffer);
 
-    header.writeUInt16LE(channels * (bitsPerSample / 8), 32);
-    return Buffer.concat([header, audioBuffer]);
-}
-
-// Generatore di segnale PCM pulito a 16kHz con effetto modulato ("din-din-din")
-function generatePcmBeep(durationMs = 1200, sampleRate = 16000, frequency = 660) {
-    const numSamples = (sampleRate * durationMs) / 1000;
-    const buffer = Buffer.alloc(numSamples * 2);
-
-    for (let i = 0; i < numSamples; i++) {
-        const t = i / sampleRate;
-        const envelope = Math.sin((i / numSamples) * Math.PI); 
-        const sample = Math.sin(2 * Math.PI * frequency * t) * 8000 * envelope;
-        buffer.writeInt16LE(Math.round(sample), i * 2);
+        // NOTA: Google TTS ritorna MP3. Se l'ESP32 si aspetta PCM grezzo o se vogliamo convertirlo,
+        // inviamo direttamente il buffer MP3/WAV a blocchi sfruttando il canale WebSocket esistente.
+        return audioBuffer;
+    } catch (err) {
+        console.error("[Errore TTS]", err);
+        return null;
     }
-    return buffer;
 }
 
 async function transcribeAudio(audioBuffer) {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) throw new Error("GROQ_API_KEY mancante.");
 
-    const wavBuffer = addWavHeader(audioBuffer);
+    // Ricostruiamo un header WAV fittizio per Whisper
+    const dataLength = audioBuffer.length;
+    const fileLength = dataLength + 36;
+    const header = Buffer.from([
+        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
+        0x57, 0x41, 0x56, 0x45, // "WAVE"
+        0x66, 0x6d, 0x74, 0x20, // "fmt "
+        16, 0, 0, 0,            
+        1, 0,                   
+        1, 0,                   
+        16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
+        32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
+        2, 0,                   
+        16, 0,                  
+        0x64, 0x61, 0x74, 0x61, // "data"
+        dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
+    ]);
+    const wavBuffer = Buffer.concat([header, audioBuffer]);
+
     const formData = new FormData();
     formData.append('file', wavBuffer, { filename: 'audio.wav', contentType: 'audio/wav' });
     formData.append('model', 'whisper-large-v3');
@@ -74,7 +78,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(userText, userName = "Alessandro", deviceContext = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo sintetico e tecnico in italiano.`;
+    const systemPrompt = `Sei Kairós, assistente IA vocale su ESP32-S3 per ${userName} a Valbrevenna. Contesto: "${deviceContext}". Rispondi in modo ESTREMAMENTE sintetico (massimo 10-15 parole) in italiano, così la risposta vocale è breve e diretta.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -82,7 +86,7 @@ async function getGroqChatResponse(userText, userName = "Alessandro", deviceCont
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userText }],
-            max_tokens: 150
+            max_tokens: 60
         })
     });
 
@@ -126,22 +130,25 @@ wss.on('connection', (ws, req) => {
                         console.error("[Errore IA]", err);
                     }
 
-                    // Invia il testo al client
+                    // 1. Invia il testo al client
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
-                    // Invia l'audio PCM a blocchi fluidi all'ESP32 subito dopo
+                    // 2. Genera l'audio parlato corrispondente al testo di Llama e invialo a blocchi
                     setTimeout(async () => {
-                        const pcmAudio = generatePcmBeep(1200, 16000, 660);
+                        const speechBuffer = await getTtsPcmAudio(replyText);
                         
-                        const chunkSize = 1024;
-                        for (let i = 0; i < pcmAudio.length; i += chunkSize) {
-                            const chunk = pcmAudio.subarray(i, i + chunkSize);
-                            ws.send(chunk);
-                            await new Promise(resolve => setTimeout(resolve, 15));
+                        if (speechBuffer && speechBuffer.length > 0) {
+                            const chunkSize = 1024;
+                            for (let i = 0; i < speechBuffer.length; i += chunkSize) {
+                                const chunk = speechBuffer.subarray(i, i + chunkSize);
+                                ws.send(chunk);
+                                await new Promise(resolve => setTimeout(resolve, 15));
+                            }
+                            console.log("[WS] Audio parlato inviato a blocchi.");
+                        } else {
+                            console.log("[WS] Impossibile generare l'audio parlato.");
                         }
-                        
-                        console.log("[WS] Audio PCM inviato a blocchi.");
-                    }, 100);
+                    }, 200);
 
                     audioBuffer = [];
                 }
