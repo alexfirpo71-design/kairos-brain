@@ -58,8 +58,10 @@ async function getSingleTtsPcm(textChunk) {
         const mp3Buffer = Buffer.from(arrayBuffer);
 
         const pcmBuffer = await new Promise((resolve, reject) => {
+            // Catena filtri FFmpeg: velocità a 1.15, equalizzazione calda e compressore pulito
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
+                '-af', 'atempo=1.15,equalizer=f=300:width_type=o:width=2:g=3,equalizer=f=3000:width_type=o:width=2:g=-2,acompressor=threshold=-18dB:ratio=3:attack=5:release=50',
                 '-f', 's16le',
                 '-acodec', 'pcm_s16le',
                 '-ac', '1',
@@ -87,7 +89,7 @@ async function getSingleTtsPcm(textChunk) {
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // Fade-out finale sul singolo pezzo per chiudere dolcemente
+        // Fade-out finale per chiudere dolcemente senza "metronomo" o tic-tac
         const fadeSamplesOut = Math.min(320, pcmBuffer.length / 2);
         const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
@@ -192,6 +194,7 @@ wss.on('connection', (ws, req) => {
     ws.deviceContext = "";
     let audioBuffer = [];
 
+    // Keep-alive periodico per evitare il timeout della connessione inattiva
     const pingInterval = setInterval(() => {
         if (ws.readyState === ws.OPEN) {
             ws.ping();
