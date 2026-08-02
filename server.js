@@ -80,6 +80,7 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
+        // Fade-in iniziale pulito
         const fadeSamplesIn = Math.min(240, pcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = pcmBuffer.readInt16LE(i * 2);
@@ -87,7 +88,8 @@ async function getSingleTtsPcm(textChunk) {
             pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        const fadeSamplesOut = Math.min(960, pcmBuffer.length / 2);
+        // Fade-out aggressivo e profondo sugli ultimi campioni per azzerare l'eco finale
+        const fadeSamplesOut = Math.min(1200, pcmBuffer.length / 2);
         const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
             const idx = (startOutIdx + i) * 2;
@@ -110,10 +112,10 @@ async function transcribeAudio(audioBuffer) {
     const dataLength = audioBuffer.length;
     const fileLength = dataLength + 36;
     const header = Buffer.from([
-        0x52, 0x49, 0x46, 0x46,
+        0x52, 0x49, 0x46, 0x46, // "RIFF"
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
-        0x57, 0x41, 0x56, 0x45,
-        0x66, 0x6d, 0x74, 0x20,
+        0x57, 0x41, 0x56, 0x45, // "WAVE"
+        0x66, 0x6d, 0x74, 0x20, // "fmt "
         16, 0, 0, 0,            
         1, 0,                   
         1, 0,                   
@@ -121,7 +123,7 @@ async function transcribeAudio(audioBuffer) {
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
         2, 0,                   
         16, 0,                  
-        0x64, 0x61, 0x74, 0x61,
+        0x64, 0x61, 0x74, 0x61, // "data"
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
     const wavBuffer = Buffer.concat([header, audioBuffer]);
@@ -134,7 +136,7 @@ async function transcribeAudio(audioBuffer) {
     const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, ...formData.getHeaders() },
-        body: wavBuffer
+        body: formData
     });
 
     if (!response.ok) throw new Error(`Errore Whisper: ${response.status}`);
@@ -205,8 +207,6 @@ wss.on('connection', (ws, req) => {
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 180);
                         
-                        ws.send(Buffer.alloc(400, 0));
-
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN) break;
                             const pcmPart = await getSingleTtsPcm(chunk);
@@ -215,13 +215,12 @@ wss.on('connection', (ws, req) => {
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
-                                    await new Promise(resolve => setTimeout(resolve, 5));
+                                    await new Promise(resolve => setTimeout(resolve, 4));
                                 }
-                                ws.send(Buffer.alloc(200, 0));
                             }
                         }
 
-                        console.log("[WS] Streaming audio completato.");
+                        console.log("[WS] Streaming audio completato pulito.");
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
                     }
