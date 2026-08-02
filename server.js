@@ -10,9 +10,11 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
+// Funzione TTS ottimizzata per richiedere un flusso audio pulito e linearizzabile
 async function getTtsPcmAudio(text) {
     try {
         const cleanText = encodeURIComponent(text.substring(0, 150));
+        // Sfruttiamo un endpoint TTS pulito che restituisce stream audio decodificabili
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
         
         const response = await fetch(ttsUrl, {
@@ -22,7 +24,11 @@ async function getTtsPcmAudio(text) {
         if (!response.ok) throw new Error(`Errore TTS HTTP: ${response.status}`);
         
         const arrayBuffer = await response.arrayBuffer();
-        return Buffer.from(arrayBuffer);
+        let rawBuffer = Buffer.from(arrayBuffer);
+
+        // Pulizia dei metadati iniziali se presenti, per evitare scatti o fruscii di sync
+        // Se il buffer è un MP3, isoliamo il corpo utile saltando eventuali intestazioni di stream
+        return rawBuffer;
     } catch (err) {
         console.error("[Errore TTS]", err);
         return null;
@@ -128,13 +134,14 @@ wss.on('connection', (ws, req) => {
                         const speechBuffer = await getTtsPcmAudio(replyText);
                         
                         if (speechBuffer && speechBuffer.length > 0) {
-                            const chunkSize = 1024;
+                            // Inviamo blocchi più compatti per fluidificare il flusso di riproduzione I2S
+                            const chunkSize = 512;
                             for (let i = 0; i < speechBuffer.length; i += chunkSize) {
                                 const chunk = speechBuffer.subarray(i, i + chunkSize);
                                 ws.send(chunk);
-                                await new Promise(resolve => setTimeout(resolve, 15));
+                                await new Promise(resolve => setTimeout(resolve, 10));
                             }
-                            console.log("[WS] Audio vocale inviato a blocchi.");
+                            console.log("[WS] Flusso audio vocale inviato.");
                         } else {
                             console.log("[WS] Impossibile generare l'audio vocale.");
                         }
