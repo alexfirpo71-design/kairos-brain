@@ -236,7 +236,6 @@ wss.on('connection', (ws, req) => {
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
-                                    // Gestione dinamica del buffer socket senza rallentamenti fissi
                                     if (ws.bufferedAmount > 32768) {
                                         await new Promise(resolve => setTimeout(resolve, 15));
                                     }
@@ -247,6 +246,10 @@ wss.on('connection', (ws, req) => {
                         }
 
                         console.log("[WS] Streaming audio completato pulito.");
+                        
+                        // Pausa di cortesia per permettere il drenaggio completo della socket tra una domanda e l'altra
+                        await new Promise(resolve => setTimeout(resolve, 50));
+
                         if (ws.readyState === ws.OPEN) {
                             ws.send(JSON.stringify({ action: 'stop', state: 'idle' }));
                         }
