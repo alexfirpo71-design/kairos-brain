@@ -80,23 +80,30 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        const fadeSamplesIn = Math.min(240, pcmBuffer.length / 2);
+        // 1. Aggiungiamo un buffer di silenzio extra in coda (es. 2000 campioni = 125 ms a 16kHz)
+        const silenceSamples = 2000; 
+        const silenceBuffer = Buffer.alloc(silenceSamples * 2); 
+        let paddedPcmBuffer = Buffer.concat([pcmBuffer, silenceBuffer]);
+
+        // 2. Fade-in iniziale
+        const fadeSamplesIn = Math.min(240, paddedPcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
-            const sample = pcmBuffer.readInt16LE(i * 2);
+            const sample = paddedPcmBuffer.readInt16LE(i * 2);
             const multiplier = i / fadeSamplesIn;
-            pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
+            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        const fadeSamplesOut = Math.min(1200, pcmBuffer.length / 2);
-        const startOutIdx = (pcmBuffer.length / 2) - fadeSamplesOut;
+        // 3. Fade-out dolce applicato interamente sulla coda di silenzio aggiunta
+        const fadeSamplesOut = silenceSamples;
+        const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
             const idx = (startOutIdx + i) * 2;
-            const sample = pcmBuffer.readInt16LE(idx);
+            const sample = paddedPcmBuffer.readInt16LE(idx);
             const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
-            pcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
+            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
         }
 
-        return pcmBuffer;
+        return paddedPcmBuffer;
     } catch (err) {
         console.error("[Errore TTS Singolo]", err.message);
         return null;
@@ -114,13 +121,13 @@ async function transcribeAudio(audioBuffer) {
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,            
-        1, 0,                   
-        1, 0,                   
+        16, 0, 0, 0,           
+        1, 0,                 
+        1, 0,                 
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,                   
-        16, 0,                  
+        2, 0,                 
+        16, 0,                
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -259,4 +266,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server su porta ${PORT}`));
+server.listen(PORT, () => console.log(`Server avviato sulla porta ${PORT}`));
