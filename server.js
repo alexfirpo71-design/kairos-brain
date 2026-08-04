@@ -241,18 +241,19 @@ wss.on('connection', (ws, req) => {
                             if (ws.readyState !== ws.OPEN) break;
                             const pcmPart = await getSingleTtsPcm(chunk);
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 2048;
+                                const chunkSize = 1024; // Chunk ridotti per alleggerire il flusso di rete
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
-                                    if (ws.bufferedAmount > 32768) {
-                                        await new Promise(resolve => setTimeout(resolve, 15));
+                                    // Controllo rigido del buffer socket per evitare saturazioni
+                                    if (ws.bufferedAmount > 16384) {
+                                        await new Promise(resolve => setTimeout(resolve, 30));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                // Pausa di respiro tra un blocco e l'altro per stabilizzare il client ESP32
-                                await new Promise(resolve => setTimeout(resolve, 50));
+                                // Pausa di respiro più ampia tra i blocchi di testo
+                                await new Promise(resolve => setTimeout(resolve, 100));
                             }
                         }
 
