@@ -80,8 +80,8 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        // 1. Aggiungiamo un buffer di silenzio extra in coda (es. 2000 campioni = 125 ms a 16kHz)
-        const silenceSamples = 2000; 
+        // 1. Buffer di silenzio extra in coda ampliato a 4000 campioni (circa 250 ms)
+        const silenceSamples = 4000; 
         const silenceBuffer = Buffer.alloc(silenceSamples * 2); 
         let paddedPcmBuffer = Buffer.concat([pcmBuffer, silenceBuffer]);
 
@@ -236,11 +236,14 @@ wss.on('connection', (ws, req) => {
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
-                                    if (ws.bufferedAmount > 65536) {
-                                        await new Promise(resolve => setTimeout(resolve, 20));
+                                    // Controllo buffer di invio alleggerito per evitare saturazioni sulla socket
+                                    if (ws.bufferedAmount > 32768) {
+                                        await new Promise(resolve => setTimeout(resolve, 15));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
+                                    // Breve respiro di cortesia per la Wi-Fi dell'ESP32
+                                    await new Promise(resolve => setTimeout(resolve, 5));
                                 }
                             }
                         }
