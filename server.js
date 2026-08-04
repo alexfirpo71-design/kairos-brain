@@ -80,12 +80,10 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        // 1. Buffer di silenzio extra in coda (4000 campioni = circa 250 ms)
         const silenceSamples = 4000; 
         const silenceBuffer = Buffer.alloc(silenceSamples * 2); 
         let paddedPcmBuffer = Buffer.concat([pcmBuffer, silenceBuffer]);
 
-        // 2. Fade-in iniziale
         const fadeSamplesIn = Math.min(240, paddedPcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = paddedPcmBuffer.readInt16LE(i * 2);
@@ -93,7 +91,6 @@ async function getSingleTtsPcm(textChunk) {
             paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
         }
 
-        // 3. Fade-out dolce applicato interamente sulla coda di silenzio aggiunta
         const fadeSamplesOut = silenceSamples;
         const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
         for (let i = 0; i < fadeSamplesOut; i++) {
@@ -177,7 +174,6 @@ wss.on('connection', (ws, req) => {
     ws.conversationHistory = [];
     let audioBuffer = [];
 
-    // Gestione attiva del battito cardiaco e dei pong
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 
@@ -201,7 +197,6 @@ wss.on('connection', (ws, req) => {
                     ws.userName = data.user;
                 }
 
-                // Filtro di sicurezza per ignorare i pacchetti di configurazione hardware/sistema
                 if (data.mac || data.device || data.user || data.location || data.status) {
                     return;
                 }
@@ -235,23 +230,25 @@ wss.on('connection', (ws, req) => {
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
                     try {
-                        const textChunks = splitTextIntoChunks(replyText, 100); // Chunk compatti a 100 caratteri
+                        const textChunks = splitTextIntoChunks(replyText, 100);
                         
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN) break;
                             const pcmPart = await getSingleTtsPcm(chunk);
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 1024;
+                                const chunkSize = 512; // Pacchetti ancora più piccoli e leggeri
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
-                                    if (ws.bufferedAmount > 16384) {
-                                        await new Promise(resolve => setTimeout(resolve, 30));
+                                    // Controllo aggressivo del buffer: se si riempie, rallentiamo decisamente
+                                    if (ws.bufferedAmount > 8192) {
+                                        await new Promise(resolve => setTimeout(resolve, 50));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                await new Promise(resolve => setTimeout(resolve, 100));
+                                // Pausa più consistente tra un chunk testuale e l'altro
+                                await new Promise(resolve => setTimeout(resolve, 150));
                             }
                         }
 
