@@ -118,13 +118,13 @@ async function transcribeAudio(audioBuffer) {
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,           
-        1, 0,                 
-        1, 0,                 
+        16, 0, 0, 0,            
+        1, 0,                   
+        1, 0,                   
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,                 
-        16, 0,                
+        2, 0,                   
+        16, 0,                  
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -250,9 +250,12 @@ wss.on('connection', (ws, req) => {
                             }
                         }
 
-                        console.log("[WS] Streaming audio completato. In attesa del drenaggio naturale sul client.");
+                        console.log("[WS] Streaming audio completato. Invio stop all'ESP32.");
                         
-                        // NESSUN INVIO DI STOP: Lasciamo che l'ESP32 chiuda lo stream da solo in base al silenzio in coda
+                        // Invio esplicito dello stop per chiudere la riproduzione senza tagliare la fine
+                        if (ws.readyState === ws.OPEN) {
+                            ws.send(JSON.stringify({ action: 'stop' }));
+                        }
 
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
@@ -271,4 +274,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server avviato sulla porta ${PORT}`));
+server.listen(PORT, () => console.log(`Server Kairós in ascolto sulla porta ${PORT}`));
