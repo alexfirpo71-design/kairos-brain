@@ -236,23 +236,25 @@ wss.on('connection', (ws, req) => {
                             if (ws.readyState !== ws.OPEN) break;
                             const pcmPart = await getSingleTtsPcm(chunk);
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 512; // Pacchetti ancora più piccoli e leggeri
+                                const chunkSize = 512;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
-                                    // Controllo aggressivo del buffer: se si riempie, rallentiamo decisamente
                                     if (ws.bufferedAmount > 8192) {
                                         await new Promise(resolve => setTimeout(resolve, 50));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                // Pausa più consistente tra un chunk testuale e l'altro
                                 await new Promise(resolve => setTimeout(resolve, 150));
                             }
                         }
 
                         console.log("[WS] Streaming audio completato pulito.");
+                        
+                        // Pausa di sicurezza per consentire all'ESP32 di svuotare il buffer hardware ed evitare il taglio dell'ultima parola
+                        await new Promise(resolve => setTimeout(resolve, 400));
+
                         if (ws.readyState === ws.OPEN) {
                             ws.send(JSON.stringify({ action: 'stop', state: 'idle' }));
                         }
