@@ -241,14 +241,16 @@ wss.on('connection', (ws, req) => {
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
+                                    // Piccolo respiro tra un pacchetto e l'altro per non saturare la Wi-Fi
+                                    await new Promise(resolve => setTimeout(resolve, 10));
                                 }
                             }
                         }
 
                         console.log("[WS] Streaming audio completato pulito.");
                         
-                        // Pausa di cortesia per permettere il drenaggio completo della socket tra una domanda e l'altra
-                        await new Promise(resolve => setTimeout(resolve, 50));
+                        // Pausa di stabilizzazione ampliata a 150 ms prima del comando stop
+                        await new Promise(resolve => setTimeout(resolve, 150));
 
                         if (ws.readyState === ws.OPEN) {
                             ws.send(JSON.stringify({ action: 'stop', state: 'idle' }));
