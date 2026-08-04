@@ -177,7 +177,7 @@ wss.on('connection', (ws, req) => {
     ws.conversationHistory = [];
     let audioBuffer = [];
 
-    // Gestione attiva del battito cardiaco e dei pong per evitare disconnessioni
+    // Gestione attiva del battito cardiaco e dei pong
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 
@@ -251,6 +251,8 @@ wss.on('connection', (ws, req) => {
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
+                                // Pausa di respiro tra un blocco e l'altro per stabilizzare il client ESP32
+                                await new Promise(resolve => setTimeout(resolve, 50));
                             }
                         }
 
