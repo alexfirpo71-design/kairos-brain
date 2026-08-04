@@ -193,7 +193,8 @@ wss.on('connection', (ws, req) => {
                     ws.userName = data.user;
                 }
 
-                if (data.mac || data.context || data.device) {
+                // Filtro di sicurezza per ignorare i pacchetti di configurazione hardware/sistema
+                if (data.mac || data.device || data.user || data.location || data.status) {
                     return;
                 }
 
@@ -236,7 +237,6 @@ wss.on('connection', (ws, req) => {
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
-                                    // Controllo intelligente del buffer socket senza rallentamenti artificiali
                                     if (ws.bufferedAmount > 32768) {
                                         await new Promise(resolve => setTimeout(resolve, 15));
                                     }
@@ -247,10 +247,6 @@ wss.on('connection', (ws, req) => {
                         }
 
                         console.log("[WS] Streaming audio completato pulito.");
-                        
-                        // Breve pausa di drenaggio finale prima dello stop
-                        await new Promise(resolve => setTimeout(resolve, 100));
-
                         if (ws.readyState === ws.OPEN) {
                             ws.send(JSON.stringify({ action: 'stop', state: 'idle' }));
                         }
