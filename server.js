@@ -11,7 +11,7 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-function splitTextIntoChunks(text, maxLength = 180) {
+function splitTextIntoChunks(text, maxLength = 100) {
     if (text.length <= maxLength) return [text];
     const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
     let chunks = [];
@@ -235,24 +235,22 @@ wss.on('connection', (ws, req) => {
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
                     try {
-                        const textChunks = splitTextIntoChunks(replyText, 180);
+                        const textChunks = splitTextIntoChunks(replyText, 100); // Chunk compatti a 100 caratteri
                         
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN) break;
                             const pcmPart = await getSingleTtsPcm(chunk);
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 1024; // Chunk ridotti per alleggerire il flusso di rete
+                                const chunkSize = 1024;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
-                                    // Controllo rigido del buffer socket per evitare saturazioni
                                     if (ws.bufferedAmount > 16384) {
                                         await new Promise(resolve => setTimeout(resolve, 30));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                // Pausa di respiro più ampia tra i blocchi di testo
                                 await new Promise(resolve => setTimeout(resolve, 100));
                             }
                         }
