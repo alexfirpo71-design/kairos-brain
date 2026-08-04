@@ -177,9 +177,17 @@ wss.on('connection', (ws, req) => {
     ws.conversationHistory = [];
     let audioBuffer = [];
 
+    // Gestione attiva del battito cardiaco e dei pong per evitare disconnessioni
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+
     const pingInterval = setInterval(() => {
-        if (ws.readyState === ws.OPEN) ws.ping();
-        else clearInterval(pingInterval);
+        if (ws.isAlive === false) {
+            clearInterval(pingInterval);
+            return ws.terminate();
+        }
+        ws.isAlive = false;
+        ws.ping();
     }, 30000);
 
     ws.on('message', async (message, isBinary) => {
