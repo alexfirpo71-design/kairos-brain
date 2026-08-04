@@ -11,7 +11,7 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-function splitTextIntoChunks(text, maxLength = 100) {
+function splitTextIntoChunks(text, maxLength = 250) {
     if (text.length <= maxLength) return [text];
     const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
     let chunks = [];
@@ -230,29 +230,28 @@ wss.on('connection', (ws, req) => {
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
                     try {
-                        const textChunks = splitTextIntoChunks(replyText, 100);
+                        const textChunks = splitTextIntoChunks(replyText, 250); // Chunk più ampi per discorsi lunghi e fluidi
                         
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN) break;
                             const pcmPart = await getSingleTtsPcm(chunk);
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 512;
+                                const chunkSize = 1024;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
-                                    if (ws.bufferedAmount > 8192) {
-                                        await new Promise(resolve => setTimeout(resolve, 50));
+                                    if (ws.bufferedAmount > 16384) {
+                                        await new Promise(resolve => setTimeout(resolve, 30));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                await new Promise(resolve => setTimeout(resolve, 150));
+                                await new Promise(resolve => setTimeout(resolve, 80));
                             }
                         }
 
                         console.log("[WS] Streaming audio completato pulito.");
                         
-                        // Pausa di sicurezza per consentire all'ESP32 di svuotare il buffer hardware ed evitare il taglio dell'ultima parola
                         await new Promise(resolve => setTimeout(resolve, 400));
 
                         if (ws.readyState === ws.OPEN) {
