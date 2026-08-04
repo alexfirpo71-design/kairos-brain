@@ -80,8 +80,8 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        // Silenzio finale leggermente più ampio (6000 campioni = circa 375ms) per chiudere in dolcezza
-        const silenceSamples = 6000; 
+        // Silenzio finale ampio per consentire all'hardware di chiudere la frase in dolcezza
+        const silenceSamples = 8000; 
         let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
 
         const fadeSamplesIn = Math.min(240, paddedPcmBuffer.length / 2);
@@ -246,19 +246,14 @@ wss.on('connection', (ws, req) => {
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                // Ridotto a zero/minimo (10ms) per evitare qualsiasi buco di ricezione tra i chunk
                                 await new Promise(resolve => setTimeout(resolve, 10));
                             }
                         }
 
-                        console.log("[WS] Streaming audio completato pulito.");
+                        console.log("[WS] Streaming audio completato. In attesa del drenaggio naturale sul client.");
                         
-                        // Pausa generosa sul server prima dello stop per lasciare tutto il tempo all'ESP32 di svuotare l'hardware
-                        await new Promise(resolve => setTimeout(resolve, 1200));
+                        // NESSUN INVIO DI STOP: Lasciamo che l'ESP32 chiuda lo stream da solo in base al silenzio in coda
 
-                        if (ws.readyState === ws.OPEN) {
-                            ws.send(JSON.stringify({ action: 'stop', state: 'idle' }));
-                        }
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
                     }
