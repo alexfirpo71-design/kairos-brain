@@ -230,7 +230,7 @@ wss.on('connection', (ws, req) => {
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
                     try {
-                        const textChunks = splitTextIntoChunks(replyText, 250); // Chunk più ampi per discorsi lunghi e fluidi
+                        const textChunks = splitTextIntoChunks(replyText, 250);
                         
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN) break;
@@ -241,12 +241,13 @@ wss.on('connection', (ws, req) => {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
                                     if (ws.bufferedAmount > 16384) {
-                                        await new Promise(resolve => setTimeout(resolve, 30));
+                                        await new Promise(resolve => setTimeout(resolve, 50));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                await new Promise(resolve => setTimeout(resolve, 80));
+                                // Pausa di respiro ottimizzata a 180ms per stabilizzare lo streaming lungo
+                                await new Promise(resolve => setTimeout(resolve, 180));
                             }
                         }
 
