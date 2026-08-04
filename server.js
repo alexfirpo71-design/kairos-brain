@@ -80,9 +80,9 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        const silenceSamples = 4000; 
-        const silenceBuffer = Buffer.alloc(silenceSamples * 2); 
-        let paddedPcmBuffer = Buffer.concat([pcmBuffer, silenceBuffer]);
+        // Silenzio finale leggermente più ampio (6000 campioni = circa 375ms) per chiudere in dolcezza
+        const silenceSamples = 6000; 
+        let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
 
         const fadeSamplesIn = Math.min(240, paddedPcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
@@ -241,19 +241,20 @@ wss.on('connection', (ws, req) => {
                                     if (ws.readyState !== ws.OPEN) break;
                                     
                                     if (ws.bufferedAmount > 16384) {
-                                        await new Promise(resolve => setTimeout(resolve, 50));
+                                        await new Promise(resolve => setTimeout(resolve, 30));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                // Pausa di respiro ottimizzata a 180ms per stabilizzare lo streaming lungo
-                                await new Promise(resolve => setTimeout(resolve, 180));
+                                // Ridotto a zero/minimo (10ms) per evitare qualsiasi buco di ricezione tra i chunk
+                                await new Promise(resolve => setTimeout(resolve, 10));
                             }
                         }
 
                         console.log("[WS] Streaming audio completato pulito.");
                         
-                        await new Promise(resolve => setTimeout(resolve, 400));
+                        // Pausa generosa sul server prima dello stop per lasciare tutto il tempo all'ESP32 di svuotare l'hardware
+                        await new Promise(resolve => setTimeout(resolve, 1200));
 
                         if (ws.readyState === ws.OPEN) {
                             ws.send(JSON.stringify({ action: 'stop', state: 'idle' }));
