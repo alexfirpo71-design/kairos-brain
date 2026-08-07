@@ -1,33 +1,60 @@
-export default async function handler(req, res) {
-    try {
-        // Qui gestiamo la richiesta proveniente dall'ESP32
-        // Nel frattempo, per testare la voce parlata senza MP3, 
-        // restituziamo un flusso PCM pulito o un codice di conferma strutturato.
-        
-        if (req.method === 'POST') {
-            // L'ESP32 ha inviato la registrazione audio dei 57KB
-            console.log("Audio ricevuto dall'ESP32 con successo.");
-            
-            // Per ora rispondiamo con un flusso binario di test pulito 
-            // (oppure qui collegheremo la risposta elaborata)
-            const sampleRate = 16000;
-            const durationSeconds = 3;
-            const numSamples = sampleRate * durationSeconds;
-            const buffer = Buffer.alloc(numSamples * 2);
-            
-            // Generiamo un segnale vocale simulato o un tono di risposta pulito
-            for (let i = 0; i < numSamples; i++) {
-                const t = i / sampleRate;
-                // Un tono modulato per distinguere la risposta del server
-                const sample = Math.sin(2 * Math.PI * 600 * t) * 10000;
-                buffer.writeInt16LE(Math.floor(sample), i * 2);
-            }
+import { GoogleGenAI } from '@google/genai';
+import { Buffer } from 'buffer';
 
-            res.setHeader('Content-Type', 'application/octet-stream');
-            return res.status(200).send(buffer);
-        } else {
-            return res.status(200).json({ status: "Kairós API Online" });
+export const config = {
+    api: {
+        bodyParser: false,
+    },
+};
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+export default async function handler(req, res) {
+    if (req.method !== 'POST') {
+        return res.status(200).json({ status: "Kairós API Online" });
+    }
+
+    try {
+        const chunks = [];
+        for await (const chunk of req) {
+            chunks.push(chunk);
         }
+        const audioBuffer = Buffer.concat(chunks);
+
+        if (audioBuffer.length === 0) {
+            return res.status(400).json({ error: 'Audio buffer is empty' });
+        }
+
+        console.log("Audio ricevuto dall'ESP32, invio a Gemini...");
+
+        // Genera la risposta testuale con Gemini istruendo il modello sul nome corretto
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [
+                {
+                    role: 'user',
+                    parts: [
+                        {
+                            inlineData: {
+                                data: audioBuffer.toString('base64'),
+                                mimeType: 'audio/pcm',
+                            },
+                        },
+                        {
+                            text: 'Ascolta questo messaggio audio e rispondi in modo sintetico e diretto. Ricorda che il tuo nome si scrive Kairós.',
+                        },
+                    ],
+                },
+            ],
+        });
+
+        const replyText = response.text || "Ricevuto.";
+        console.log(`[Kairós AI] Risposta generata: "${replyText}"`);
+
+        // Per adesso, restituiamo il testo elaborato o un pacchetto di conferma pulito per l'ESP32
+        // Nota: se l'ESP32 si aspetta PCM grezzo, qui dovremmo mappare il TTS, 
+        // ma intanto restituiamo un JSON o un buffer vuoto sicuro finché non colleghi il TTS desiderato.
+        return res.status(200).json({ reply: replyText });
 
     } catch (error) {
         console.error("Errore server:", error.message);
