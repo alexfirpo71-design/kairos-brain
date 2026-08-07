@@ -1,15 +1,8 @@
-const { createServer } = require('http');
-const { WebSocketServer } = require('ws');
-const { spawn } = require('child_process');
-
-// Import dinamico di node-fetch e form-data per compatibilità CommonJS
-let fetch, FormData;
-(async () => {
-    const fetchModule = await import('node-fetch');
-    fetch = fetchModule.default;
-    const formDataModule = await import('form-data');
-    FormData = formDataModule.default;
-})();
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
+import fetch from 'node-fetch';
+import FormData from 'form-data';
+import { spawn } from 'child_process';
 
 const server = createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
