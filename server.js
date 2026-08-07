@@ -11,8 +11,11 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Mappa globale per mantenere la cronologia persistente basata sul MAC del dispositivo
+// Mappa globale per la cronologia persistente basata sul MAC
 const sessionHistories = new Map();
+
+// Gestione globale del volume (valore percentuale da 0 a 100, default 70)
+let currentVolume = 70;
 
 function splitTextIntoChunks(text, maxLength = 250) {
     if (text.length <= maxLength) return [text];
@@ -46,7 +49,7 @@ function splitTextIntoChunks(text, maxLength = 250) {
     return chunks;
 }
 
-async function getSingleTtsPcm(textChunk) {
+async function getSingleTtsPcm(textChunk, volumePercent) {
     try {
         const cleanText = encodeURIComponent(textChunk);
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
@@ -60,10 +63,13 @@ async function getSingleTtsPcm(textChunk) {
         const arrayBuffer = await response.arrayBuffer();
         const mp3Buffer = Buffer.from(arrayBuffer);
 
+        // Calcola il guadagno audio (volume) in base alla percentuale (da 0.1 a 2.0)
+        const volumeFactor = Math.max(0.05, volumePercent / 70);
+
         const pcmBuffer = await new Promise((resolve, reject) => {
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
-                '-af', 'atempo=1.15,equalizer=f=300:width_type=o:width=2:g=3,equalizer=f=3000:width_type=o:width=2:g=-2,acompressor=threshold=-18dB:ratio=3:attack=5:release=50',
+                '-af', `volume=${volumeFactor},atempo=1.15,equalizer=f=300:width_type=o:width=2:g=3,equalizer=f=3000:width_type=o:width=2:g=-2,acompressor=threshold=-18dB:ratio=3:attack=5:release=50`,
                 '-f', 's16le',
                 '-acodec', 'pcm_s16le',
                 '-ac', '1',
@@ -160,7 +166,7 @@ Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettron
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'llama-3.1-8b-instant', // Modello aggiornato per evitare blocchi 429
+            model: 'llama-3.1-8b-instant',
             messages: messages,
             max_tokens: 300,
             temperature: 0.7
@@ -202,6 +208,12 @@ wss.on('connection', (ws, req) => {
             try {
                 const data = JSON.parse(message.toString());
                 
+                if (data.action === 'stop') {
+                    console.log("[WS] Ricevuto comando di stop manuale/remoto.");
+                    audioBuffer = [];
+                    return;
+                }
+
                 if (data.user) {
                     ws.userName = data.user;
                 }
@@ -228,16 +240,33 @@ wss.on('connection', (ws, req) => {
                         console.log(`[Whisper] Trascritto: "${transcript}"`);
                         
                         if (transcript && transcript.trim().length > 0) {
-                            ws.conversationHistory.push({ role: 'user', content: transcript });
+                            const lowerTranscript = transcript.toLowerCase().trim();
 
-                            replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                            console.log(`[Llama] Risposta: "${replyText}"`);
-
-                            ws.conversationHistory.push({ role: 'assistant', content: replyText });
-
-                            if (ws.conversationHistory.length > 10) {
-                                ws.conversationHistory = ws.conversationHistory.slice(-10);
+                            // Gestione Comando STOP vocale
+                            if (lowerTranscript === 'stop' || lowerTranscript === 'fermati' || lowerTranscript === 'basta') {
+                                replyText = "Fatto.";
+                                ws.send(JSON.stringify({ action: 'stop', state: 'idle', text: replyText }));
+                                return;
                             }
+
+                            // Gestione Comandi Volume Vocali
+                            if (lowerTranscript.includes('alza il volume') || lowerTranscript.includes('più alto')) {
+                                currentVolume = Math.min(100, currentVolume + 15);
+                                replyText = `Volume impostato al ${currentVolume} percento.`;
+                            } else if (lowerTranscript.includes('abbassa il volume') || lowerTranscript.includes('più basso')) {
+                                currentVolume = Math.max(10, currentVolume - 15);
+                                replyText = `Volume impostato al ${currentVolume} percento.`;
+                            } else {
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
+                                replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+
+                                if (ws.conversationHistory.length > 10) {
+                                    ws.conversationHistory = ws.conversationHistory.slice(-10);
+                                }
+                            }
+
+                            console.log(`[Llama/Command] Risposta: "${replyText}" (Volume: ${currentVolume}%)`);
                         }
                     } catch (err) {
                         console.error("[Errore IA]", err);
@@ -251,7 +280,7 @@ wss.on('connection', (ws, req) => {
                         
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN) break;
-                            const pcmPart = await getSingleTtsPcm(chunk);
+                            const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             if (pcmPart && pcmPart.length > 0) {
                                 const chunkSize = 1024;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
