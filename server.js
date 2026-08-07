@@ -193,6 +193,7 @@ wss.on('connection', (ws, req) => {
     ws.userName = "Alessandro";
     ws.conversationHistory = [];
     let audioChunks = [];
+    let isProcessing = false;
 
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
@@ -206,9 +207,88 @@ wss.on('connection', (ws, req) => {
         ws.ping();
     }, 30000);
 
+    async function processAccumulatedAudio() {
+        if (isProcessing || audioChunks.length === 0) return;
+        isProcessing = true;
+        
+        const completeAudioBuffer = Buffer.concat(audioChunks);
+        audioChunks = [];
+
+        let replyText = "Ricevuto.";
+        
+        try {
+            console.log(`[Whisper] Elaborazione audio: ${completeAudioBuffer.length} bytes`);
+            
+            if (completeAudioBuffer.length < 500) {
+                console.log("[Whisper] Audio troppo corto, scartato.");
+                isProcessing = false;
+                return;
+            }
+
+            const transcript = await transcribeAudio(completeAudioBuffer);
+            console.log(`[Whisper] Trascritto: "${transcript}"`);
+            
+            if (transcript && transcript.trim().length > 0) {
+                ws.conversationHistory.push({ role: 'user', content: transcript });
+
+                replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                console.log(`[Llama] Risposta: "${replyText}"`);
+
+                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+
+                if (ws.conversationHistory.length > 10) {
+                    ws.conversationHistory = ws.conversationHistory.slice(-10);
+                }
+            } else {
+                replyText = "Non ho capito cosa hai detto, potresti ripetere?";
+            }
+        } catch (err) {
+            console.error("[Errore Pipeline IA]:", err.message);
+            replyText = "Si è verificato un errore di elaborazione interno.";
+        }
+
+        if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
+        }
+
+        try {
+            const textChunks = splitTextIntoChunks(replyText, 200);
+            
+            for (let chunk of textChunks) {
+                if (ws.readyState !== ws.OPEN) break;
+                const pcmPart = await getSingleTtsPcm(chunk);
+                if (pcmPart && pcmPart.length > 0) {
+                    const chunkSize = 1024;
+                    for (let i = 0; i < pcmPart.length; i += chunkSize) {
+                        if (ws.readyState !== ws.OPEN) break;
+                        
+                        if (ws.bufferedAmount > 16384) {
+                            await new Promise(resolve => setTimeout(resolve, 20));
+                        }
+                        
+                        ws.send(pcmPart.subarray(i, i + chunkSize));
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 5));
+                }
+            }
+
+            console.log("[WS] Streaming audio completato. Invio stop.");
+            if (ws.readyState === ws.OPEN) {
+                ws.send(JSON.stringify({ action: 'stop' }));
+            }
+
+        } catch (streamErr) {
+            console.error("[Errore Streaming Audio]:", streamErr.message);
+        } finally {
+            isProcessing = false;
+        }
+    }
+
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
-            audioChunks.push(Buffer.isBuffer(message) ? message : Buffer.from(message));
+            if (!isProcessing) {
+                audioChunks.push(Buffer.isBuffer(message) ? message : Buffer.from(message));
+            }
         } else {
             try {
                 const textMsg = message.toString();
@@ -225,77 +305,12 @@ wss.on('connection', (ws, req) => {
                     }
 
                     if (data.state === 'listening') {
-                        audioChunks = []; // Pulisce il buffer all'avvio dell'ascolto
+                        audioChunks = [];
+                        isProcessing = false;
                     }
 
                     if (data.state === 'processing') {
-                        const completeAudioBuffer = Buffer.concat(audioChunks);
-                        audioChunks = [];
-
-                        let replyText = "Ricevuto.";
-                        
-                        try {
-                            console.log(`[Whisper] Elaborazione audio: ${completeAudioBuffer.length} bytes`);
-                            
-                            if (completeAudioBuffer.length < 500) {
-                                console.log("[Whisper] Audio troppo corto, scartato.");
-                                replyText = "Non ho registrato alcun audio percepibile.";
-                            } else {
-                                const transcript = await transcribeAudio(completeAudioBuffer);
-                                console.log(`[Whisper] Trascritto: "${transcript}"`);
-                                
-                                if (transcript && transcript.trim().length > 0) {
-                                    ws.conversationHistory.push({ role: 'user', content: transcript });
-
-                                    replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                                    console.log(`[Llama] Risposta: "${replyText}"`);
-
-                                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
-
-                                    if (ws.conversationHistory.length > 10) {
-                                        ws.conversationHistory = ws.conversationHistory.slice(-10);
-                                    }
-                                } else {
-                                    replyText = "Non ho capito cosa hai detto, potresti ripetere?";
-                                }
-                            }
-                        } catch (err) {
-                            console.error("[Errore Pipeline IA]:", err.message);
-                            replyText = "Si è verificato un errore di elaborazione interno.";
-                        }
-
-                        // Notifica l'ESP32 che stiamo per inviare la risposta
-                        ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
-
-                        try {
-                            const textChunks = splitTextIntoChunks(replyText, 200);
-                            
-                            for (let chunk of textChunks) {
-                                if (ws.readyState !== ws.OPEN) break;
-                                const pcmPart = await getSingleTtsPcm(chunk);
-                                if (pcmPart && pcmPart.length > 0) {
-                                    const chunkSize = 1024;
-                                    for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                        if (ws.readyState !== ws.OPEN) break;
-                                        
-                                        if (ws.bufferedAmount > 16384) {
-                                            await new Promise(resolve => setTimeout(resolve, 20));
-                                        }
-                                        
-                                        ws.send(pcmPart.subarray(i, i + chunkSize));
-                                    }
-                                    await new Promise(resolve => setTimeout(resolve, 5));
-                                }
-                            }
-
-                            console.log("[WS] Streaming audio completato. Invio stop.");
-                            if (ws.readyState === ws.OPEN) {
-                                ws.send(JSON.stringify({ action: 'stop' }));
-                            }
-
-                        } catch (streamErr) {
-                            console.error("[Errore Streaming Audio]:", streamErr.message);
-                        }
+                        await processAccumulatedAudio();
                     }
                 }
             } catch (e) {
