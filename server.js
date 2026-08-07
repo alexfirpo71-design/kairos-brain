@@ -153,8 +153,10 @@ async function transcribeAudio(audioBuffer) {
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
-Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
-Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatti Lulù e Matti, coniglio Isalide, cane Miele, passioni per retrogaming, flight simulation e cucina tecnica).`;
+REGOLA DI STILE DINAMICA:
+- Se ti viene fatta una domanda semplice, un comando o una richiesta rapida, rispondi SEMPRE in modo lapidario, secco e con un massimo di una o due frasi. Zero chit-chat, zero convenevoli.
+- Se invece ti viene chiesto esplicitamente un approfondimento tecnico, un calcolo, un testo lungo o del codice, allora puoi essere completo ed esaustivo sfruttando lo spazio necessario.
+Profilo utente: 55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatti Lulù e Matti, coniglio Isalide, cane Miele, passioni per retrogaming, flight simulation e cucina tecnica.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -165,7 +167,7 @@ Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettron
             model: 'llama-3.1-8b-instant',
             messages: messages,
             max_tokens: 300,
-            temperature: 0.7
+            temperature: 0.3
         })
     });
 
@@ -245,15 +247,13 @@ wss.on('connection', (ws, req) => {
                                 return;
                             }
 
-                            // Controllo flessibile per ALZA IL VOLUME, con fix per l'incomprensione "Alfa Romeo"
                             if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('più alto') || rawText.includes('volume su') || (rawText.includes('alfa') && rawText.includes('romeo'))) {
                                 currentVolume = Math.min(100, currentVolume + 15);
-                                replyText = `Volume al ${currentVolume} per cento.`;
+                                replyText = `Volume al ${currentVolume} percento.`;
                             } 
-                            // Controllo flessibile per ABBASSA IL VOLUME
                             else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('più basso') || rawText.includes('volume giu') || rawText.includes('volume giù')) {
                                 currentVolume = Math.max(10, currentVolume - 15);
-                                replyText = `Volume al ${currentVolume} per cento.`;
+                                replyText = `Volume al ${currentVolume} percento.`;
                             } 
                             else {
                                 ws.conversationHistory.push({ role: 'user', content: transcript });
