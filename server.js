@@ -1,319 +1,52 @@
-import { createServer } from 'http';
-import { WebSocketServer } from 'ws';
-import fetch from 'node-fetch';
-import FormData from 'form-data';
-import { spawn } from 'child_process';
+const express = require('express');
+const { createServer } = require('http');
+const { WebSocketServer } = require('ws');
 
-const server = createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Kairos Brain Server is running!\n');
-});
+const app = express();
+const server = createServer(app);
 
+// Configurazione corretta del WebSocket Server che intercetta il percorso /ws
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-const sessionHistories = new Map();
-
-function splitTextIntoChunks(text, maxLength = 200) {
-    if (text.length <= maxLength) return [text];
-    const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
-    let chunks = [];
-    let currentChunk = "";
-
-    for (let sentence of sentences) {
-        if ((currentChunk + sentence).length <= maxLength) {
-            currentChunk += sentence;
-        } else {
-            if (currentChunk) chunks.push(currentChunk.trim());
-            if (sentence.length > maxLength) {
-                let words = sentence.split(" ");
-                let subChunk = "";
-                for (let word of words) {
-                    if ((subChunk + " " + word).length <= maxLength) {
-                        subChunk += (subChunk ? " " : "") + word;
-                    } else {
-                        if (subChunk) chunks.push(subChunk.trim());
-                        subChunk = word;
-                    }
-                }
-                currentChunk = subChunk;
-            } else {
-                currentChunk = sentence;
-            }
-        }
-    }
-    if (currentChunk) chunks.push(currentChunk.trim());
-    return chunks;
-}
-
-async function getSingleTtsPcm(textChunk) {
-    try {
-        const cleanText = encodeURIComponent(textChunk);
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
-        
-        const response = await fetch(ttsUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-        });
-
-        if (!response.ok) throw new Error(`Errore TTS HTTP: ${response.status}`);
-        
-        const arrayBuffer = await response.arrayBuffer();
-        const mp3Buffer = Buffer.from(arrayBuffer);
-
-        const pcmBuffer = await new Promise((resolve, reject) => {
-            const ffmpeg = spawn('ffmpeg', [
-                '-i', 'pipe:0',
-                '-af', 'atempo=1.15,equalizer=f=300:width_type=o:width=2:g=3,equalizer=f=3000:width_type=o:width=2:g=-2,acompressor=threshold=-18dB:ratio=3:attack=5:release=50',
-                '-f', 's16le',
-                '-acodec', 'pcm_s16le',
-                '-ac', '1',
-                '-ar', '16000',
-                'pipe:1'
-            ]);
-
-            let chunks = [];
-            ffmpeg.stdout.on('data', chunk => chunks.push(chunk));
-            ffmpeg.on('close', code => {
-                if (code === 0) resolve(Buffer.concat(chunks));
-                else reject(new Error(`FFmpeg exited with code ${code}`));
-            });
-            ffmpeg.on('error', err => reject(err));
-
-            ffmpeg.stdin.write(mp3Buffer);
-            ffmpeg.stdin.end();
-        });
-
-        const silenceSamples = 4000; 
-        let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
-
-        const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
-        for (let i = 0; i < fadeSamplesIn; i++) {
-            const sample = paddedPcmBuffer.readInt16LE(i * 2);
-            const multiplier = i / fadeSamplesIn;
-            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
-        }
-
-        const fadeSamplesOut = silenceSamples;
-        const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
-        for (let i = 0; i < fadeSamplesOut; i++) {
-            const idx = (startOutIdx + i) * 2;
-            const sample = paddedPcmBuffer.readInt16LE(idx);
-            const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
-            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
-        }
-
-        return paddedPcmBuffer;
-    } catch (err) {
-        console.error("[Errore TTS Singolo]:", err.message);
-        return null;
-    }
-}
-
-async function transcribeAudio(audioBuffer) {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY mancante.");
-
-    const dataLength = audioBuffer.length;
-    const fileLength = dataLength + 36;
-    const header = Buffer.from([
-        0x52, 0x49, 0x46, 0x46,
-        fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
-        0x57, 0x41, 0x56, 0x45,
-        0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,    
-        1, 0,              
-        1, 0,              
-        16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
-        32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,              
-        16, 0,             
-        0x64, 0x61, 0x74, 0x61,
-        dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
-    ]);
-    const wavBuffer = Buffer.concat([header, audioBuffer]);
-
-    const formData = new FormData();
-    formData.append('file', wavBuffer, { filename: 'audio.wav', contentType: 'audio/wav' });
-    formData.append('model', 'whisper-large-v3');
-    formData.append('language', 'it');
-
-    const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, ...formData.getHeaders() },
-        body: formData
-    });
-
-    if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`Errore Whisper HTTP ${response.status}: ${errorBody}`);
-    }
-    const data = await response.json();
-    return data.text;
-}
-
-async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY mancante.");
-
-    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
-Parli sempre in italiano in modo fluido, diretto, esaustivo e senza ripetizioni. 
-Ricordi e tieni conto dei messaggi precedenti della conversazione e del profilo dell'utente.
-
-PROFILO UTENTE (ALESSANDRO):
-- Età: 55 anni, residente a Genova e Valbrevenna.
-- Professione: Perito Elettronico, sales representative (monomandatario).
-- Famiglia / Affetti: Ha una figlia di nome Margot (11 anni, appassionata d'arte e disegno) e una fidanzata di nome Tiziana. Usa la parola "famiglia" per riferirsi ai suoi cari e ai suoi animali (i gatti Lulù e Matti, il coniglio Isalide, il cane Miele).
-- Interessi e Competenze: Restauro di hardware retrogaming, micro-soldering, flight simulation (airliner), astronomia, droni (pilota UAS) e cucina tecnica (gelato artigianale, buffet a tema).
-- Progetti attuali: Sviluppo del firmware e hardware di Kairós (ESP32-S3, Freenove, PlatformIO, Vercel/Render, API Groq) e lavori di rifinitura e plumbing nella casetta di legno al campeggio di Carasco.
-
-Comportati come un assistente collaborativo, tecnico e caloroso, che conosce a fondo questi dettagli e li usa per contestualizzare ogni risposta in modo naturale.`;
-
-    const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
-
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: messages,
-            max_tokens: 500,
-            temperature: 0.7
-        })
-    });
-
-    if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`Errore Chat HTTP ${response.status}: ${errorBody}`);
-    }
-    const data = await response.json();
-    return data.choices[0].message.content;
-}
+app.get('/', (req, res) => {
+    res.send('Kairós Brain Server is online!');
+});
 
 wss.on('connection', (ws, req) => {
-    console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
-    ws.userName = "Alessandro";
-    ws.conversationHistory = [];
-    let audioChunks = [];
-
-    ws.isAlive = true;
-    ws.on('pong', () => { ws.isAlive = true; });
-
-    const pingInterval = setInterval(() => {
-        if (ws.isAlive === false) {
-            clearInterval(pingInterval);
-            return ws.terminate();
-        }
-        ws.isAlive = false;
-        ws.ping();
-    }, 30000);
+    console.log(`[WS] Dispositivo connesso da IP: ${req.socket.remoteAddress}`);
 
     ws.on('message', async (message, isBinary) => {
-        if (Buffer.isBuffer(message) || isBinary) {
-            audioChunks.push(Buffer.isBuffer(message) ? message : Buffer.from(message));
-            return;
-        }
-
-        try {
-            const textMsg = message.toString();
-            if (!textMsg.startsWith('{')) {
-                return;
-            }
-
-            const data = JSON.parse(textMsg);
+        if (isBinary) {
+            // Qui ricevi l'audio binario dall'ESP32 (VAD o Pulsante)
+            console.log(`[WS] Ricevuti ${message.length} bytes di audio binario.`);
             
-            if (data.user) ws.userName = data.user;
-            if (data.mac) {
-                ws.mac = data.mac;
-                if (!sessionHistories.has(data.mac)) {
-                    sessionHistories.set(data.mac, []);
-                }
-                ws.conversationHistory = sessionHistories.get(data.mac);
-            }
-
-            if (data.state === 'listening') {
-                audioChunks = []; 
-                console.log("[WS] Inizio ricezione audio...");
-            }
-
-            if (data.state === 'processing') {
-                const completeAudioBuffer = Buffer.concat(audioChunks);
-                audioChunks = [];
-
-                let replyText = "Ricevuto.";
+            // Esempio di risposta fittizia o inoltro a Groq/TTS
+            // ws.send(bufferAudioDiRisposta);
+        } else {
+            try {
+                const data = JSON.parse(message.toString());
+                console.log('[WS] Messaggio JSON ricevuto:', data);
                 
-                try {
-                    console.log(`[Whisper] Elaborazione audio: ${completeAudioBuffer.length} bytes`);
-                    
-                    if (completeAudioBuffer.length < 500) {
-                        console.log("[Whisper] Audio troppo corto, scartato.");
-                        replyText = "Non ho registrato alcun audio percepibile.";
-                    } else {
-                        const transcript = await transcribeAudio(completeAudioBuffer);
-                        console.log(`[Whisper] Trascritto: "${transcript}"`);
-                        
-                        if (transcript && transcript.trim().length > 0) {
-                            ws.conversationHistory.push({ role: 'user', content: transcript });
-
-                            replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                            console.log(`[Llama] Risposta: "${replyText}"`);
-
-                            ws.conversationHistory.push({ role: 'assistant', content: replyText });
-
-                            if (ws.conversationHistory.length > 10) {
-                                ws.conversationHistory = ws.conversationHistory.slice(-10);
-                            }
-                        } else {
-                            replyText = "Non ho capito cosa hai detto, potresti ripetere?";
-                        }
-                    }
-                } catch (err) {
-                    console.error("[Errore Pipeline IA]:", err.message);
-                    replyText = "Si è verificato un errore di elaborazione interno.";
+                if (data.state === 'listening') {
+                    console.log('[Kairós] Stato: In ascolto...');
                 }
-
-                ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
-
-                try {
-                    const textChunks = splitTextIntoChunks(replyText, 200);
-                    
-                    for (let chunk of textChunks) {
-                        if (ws.readyState !== ws.OPEN) break;
-                        const pcmPart = await getSingleTtsPcm(chunk);
-                        if (pcmPart && pcmPart.length > 0) {
-                            const chunkSize = 1024;
-                            for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                if (ws.readyState !== ws.OPEN) break;
-                                
-                                if (ws.bufferedAmount > 16384) {
-                                    await new Promise(resolve => setTimeout(resolve, 20));
-                                }
-                                
-                                ws.send(pcmPart.subarray(i, i + chunkSize));
-                            }
-                            await new Promise(resolve => setTimeout(resolve, 5));
-                        }
-                    }
-
-                    console.log("[WS] Streaming audio completato. Invio stop.");
-                    if (ws.readyState === ws.OPEN) {
-                        ws.send(JSON.stringify({ action: 'stop' }));
-                    }
-
-                } catch (streamErr) {
-                    console.error("[Errore Streaming Audio]:", streamErr.message);
-                }
+            } catch (e) {
+                console.log('[WS] Messaggio di testo grezzo:', message.toString());
             }
-        } catch (e) {
-            console.log('[WS Messaggio non JSON]:', message.toString());
         }
     });
 
     ws.on('close', () => {
-        clearInterval(pingInterval);
-        console.log("[WS] Connessione chiusa.");
+        console.log('[WS] Connessione chiusa dal client.');
+    });
+
+    ws.on('error', (error) => {
+        console.error('[WS Errore]:', error);
     });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Server in ascolto sulla porta ${PORT}`);
+// Fondamentale: usa SEMPRE process.env.PORT per Render
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`==> Server Kairós avviato e in ascolto sulla porta ${PORT}`);
 });
