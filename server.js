@@ -209,7 +209,6 @@ wss.on('connection', (ws, req) => {
                 const data = JSON.parse(message.toString());
                 
                 if (data.action === 'stop') {
-                    console.log("[WS] Comando di stop ricevuto dall'ESP32.");
                     ws.isSpeaking = false;
                     audioBuffer = [];
                     return;
@@ -244,7 +243,6 @@ wss.on('connection', (ws, req) => {
                             if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
                                 ws.isSpeaking = false;
                                 ws.send(JSON.stringify({ action: 'stop' }));
-                                console.log("[Comando] Interruzione eseguita.");
                                 return;
                             }
 
@@ -265,12 +263,10 @@ wss.on('connection', (ws, req) => {
                                     ws.conversationHistory = ws.conversationHistory.slice(-10);
                                 }
                             }
-
-                            console.log(`[Elaborato] Risposta: "${replyText}" | Volume: ${currentVolume}%`);
                         }
                     } catch (err) {
                         console.error("[Errore IA]", err);
-                        replyText = "Si è verificato un errore di elaborazione.";
+                        replyText = "Si è verificato un errore.";
                     }
 
                     ws.isSpeaking = true;
@@ -284,22 +280,21 @@ wss.on('connection', (ws, req) => {
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 1024;
+                                const chunkSize = 512; // Streaming più leggero e stabile
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
-                                    if (ws.bufferedAmount > 16384) {
-                                        await new Promise(resolve => setTimeout(resolve, 30));
+                                    if (ws.bufferedAmount > 8192) {
+                                        await new Promise(resolve => setTimeout(resolve, 50)); 
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                await new Promise(resolve => setTimeout(resolve, 10));
+                                await new Promise(resolve => setTimeout(resolve, 30)); 
                             }
                         }
 
                         if (ws.isSpeaking) {
-                            console.log("[WS] Streaming audio completato.");
                             if (ws.readyState === ws.OPEN) {
                                 ws.send(JSON.stringify({ action: 'stop' }));
                             }
@@ -307,7 +302,6 @@ wss.on('connection', (ws, req) => {
                         ws.isSpeaking = false;
 
                     } catch (streamErr) {
-                        console.error("[Errore Streaming Audio]", streamErr);
                         ws.isSpeaking = false;
                     }
                 }
@@ -320,7 +314,6 @@ wss.on('connection', (ws, req) => {
     ws.on('close', () => {
         clearInterval(pingInterval);
         ws.isSpeaking = false;
-        console.log("[WS] Connessione chiusa.");
     });
 });
 
