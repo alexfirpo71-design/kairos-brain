@@ -12,7 +12,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
+        return res.status(200).json({ status: "Kairós API Online" });
     }
 
     try {
@@ -25,6 +25,8 @@ export default async function handler(req, res) {
         if (audioBuffer.length === 0) {
             return res.status(400).json({ error: 'Audio buffer is empty' });
         }
+
+        console.log("Audio ricevuto dall'ESP32, invio a Gemini...");
 
         // Genera la risposta testuale con Gemini
         const response = await ai.models.generateContent({
@@ -40,7 +42,7 @@ export default async function handler(req, res) {
                             },
                         },
                         {
-                            text: 'Ascolta questo messaggio audio e rispondi in modo sintetico, diretto.',
+                            text: 'Ascolta questo messaggio audio e rispondi in modo sintetico e diretto (massimo 2 frasi). Ricorda che il tuo nome si scrive Kairós.',
                         },
                     ],
                 },
@@ -48,9 +50,9 @@ export default async function handler(req, res) {
         });
 
         const replyText = response.text || "Ricevuto.";
-        console.log(`[Elaborato] Risposta: "${replyText}"`);
+        console.log(`[Kairós AI] Risposta generata: "${replyText}"`);
 
-        // Codifica il testo per la richiesta TTS di Google Translate (evitando errori 400 da caratteri speciali)
+        // Converte il testo in flusso audio binario per l'ESP32
         const encodedText = encodeURIComponent(replyText.substring(0, 200));
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=it&client=tw-ob`;
 
@@ -61,8 +63,7 @@ export default async function handler(req, res) {
         });
 
         if (!ttsResponse.ok) {
-            console.error(`[Errore TTS Singolo] Errore TTS HTTP: ${ttsResponse.status}`);
-            return res.status(400).json({ error: 'TTS request failed' });
+            throw new Error('TTS request failed');
         }
 
         const ttsArrayBuffer = await ttsResponse.arrayBuffer();
@@ -70,11 +71,11 @@ export default async function handler(req, res) {
 
         res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Content-Length', pcmBuffer.length);
-        console.log('[WS] Streaming audio completato.');
+        console.log('[Kairós AI] Invio streaming audio all ESP32 completato.');
         return res.status(200).send(pcmBuffer);
 
     } catch (error) {
-        console.error('Errore server:', error);
+        console.error("Errore server:", error.message);
         return res.status(500).json({ error: error.message });
     }
 }
