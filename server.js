@@ -183,7 +183,7 @@ wss.on('connection', (ws, req) => {
     console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.userName = "Alessandro";
     ws.conversationHistory = [];
-    ws.isSpeaking = false; // Flag per tracciare se sta inviando audio
+    ws.isSpeaking = false;
     let audioBuffer = [];
 
     ws.isAlive = true;
@@ -200,7 +200,6 @@ wss.on('connection', (ws, req) => {
 
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
-            // Se sta parlando e riceve altra voce (es. un comando di stop pronunciato sopra), interrompe
             audioBuffer.push(message);
         } else {
             try {
@@ -237,23 +236,26 @@ wss.on('connection', (ws, req) => {
                         console.log(`[Whisper] Trascritto: "${transcript}"`);
                         
                         if (transcript && transcript.trim().length > 0) {
-                            const lowerTranscript = transcript.toLowerCase().trim();
+                            const rawText = transcript.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").trim();
 
-                            // Interrompi subito se l'utente dice stop / fermati / basta
-                            if (lowerTranscript.includes('stop') || lowerTranscript.includes('fermati') || lowerTranscript.includes('basta')) {
+                            if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
                                 ws.isSpeaking = false;
                                 ws.send(JSON.stringify({ action: 'stop' }));
+                                console.log("[Comando] Interruzione eseguita.");
                                 return;
                             }
 
-                            // Gestione immediata del volume
-                            if (lowerTranscript.includes('alza il volume') || lowerTranscript.includes('più alto')) {
+                            // Controllo flessibile per ALZA IL VOLUME, con fix per l'incomprensione "Alfa Romeo"
+                            if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('più alto') || rawText.includes('volume su') || (rawText.includes('alfa') && rawText.includes('romeo'))) {
                                 currentVolume = Math.min(100, currentVolume + 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
-                            } else if (lowerTranscript.includes('abbassa il volume') || lowerTranscript.includes('più basso')) {
+                            } 
+                            // Controllo flessibile per ABBASSA IL VOLUME
+                            else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('più basso') || rawText.includes('volume giu') || rawText.includes('volume giù')) {
                                 currentVolume = Math.max(10, currentVolume - 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
-                            } else {
+                            } 
+                            else {
                                 ws.conversationHistory.push({ role: 'user', content: transcript });
                                 replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
@@ -263,7 +265,7 @@ wss.on('connection', (ws, req) => {
                                 }
                             }
 
-                            console.log(`[Elaborato] Risposta: "${replyText}" | Volume attuale: ${currentVolume}%`);
+                            console.log(`[Elaborato] Risposta: "${replyText}" | Volume: ${currentVolume}%`);
                         }
                     } catch (err) {
                         console.error("[Errore IA]", err);
