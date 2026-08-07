@@ -121,12 +121,12 @@ async function transcribeAudio(audioBuffer) {
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
         16, 0, 0, 0,         
-        1, 0,                 
-        1, 0,                 
+        1, 0,               
+        1, 0,               
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,                 
-        16, 0,                
+        2, 0,               
+        16, 0,              
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -150,7 +150,18 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. Parli sempre in italiano in modo fluido, diretto, esaustivo e senza ripetizioni. Ricordi e tieni conto dei messaggi precedenti della conversazione.`;
+    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
+Parli sempre in italiano in modo fluido, diretto, esaustivo e senza ripetizioni. 
+Ricordi e tieni conto dei messaggi precedenti della conversazione e del profilo dell'utente.
+
+PROFILO UTENTE (ALESSANDRO):
+- Età: 55 anni, residente a Genova.
+- Professione: Perito Elettronico, sales representative (monomandatario).
+- Famiglia / Affetti: Ha una figlia di nome Margot (11 anni, appassionata d'arte e disegno) e una fidanzata di nome Tiziana. Usa la parola "famiglia" per riferirsi ai suoi cari e ai suoi animali (i gatti Lulù e Matti, il coniglio Isalide, il cane Miele).
+- Interessi e Competenze: Restauro di hardware retrogaming, micro-soldering, flight simulation (airliner), astronomia, droni (pilota UAS) e cucina tecnica (gelato artigianale, buffet a tema).
+- Progetti attuali: Sviluppo del firmware e hardware di Kairós (ESP32-S3, Freenove, PlatformIO, Vercel/Render, API Groq) e lavori di rifinitura e plumbing nella casetta di legno al campeggio di Carasco.
+
+Comportati come un assistente collaborativo, tecnico e caloroso, che conosce a fondo questi dettagli e li usa per contestualizzare ogni risposta in modo naturale.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -284,4 +295,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server Kairos Brain in ascolto sulla porta ${PORT}`));
+server.listen(PORT, () => console.log(`Kairos Brain Server running on port ${PORT}`));
