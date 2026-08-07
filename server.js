@@ -123,12 +123,12 @@ async function transcribeAudio(audioBuffer) {
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
         16, 0, 0, 0,         
-        1, 0,               
-        1, 0,               
+        1, 0,                 
+        1, 0,                 
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,               
-        16, 0,              
+        2, 0,                 
+        16, 0,                
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -236,10 +236,8 @@ wss.on('connection', (ws, req) => {
                         console.log(`[Whisper] Trascritto: "${transcript}"`);
                         
                         if (transcript && transcript.trim().length > 0) {
-                            // Pulizia rigorosa della trascrizione per eliminare punteggiatura o spazi superflui
                             const rawText = transcript.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").trim();
 
-                            // Controllo flessibile per lo STOP (intercetta stop, fermati, basta, silenzio)
                             if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
                                 ws.isSpeaking = false;
                                 ws.send(JSON.stringify({ action: 'stop' }));
@@ -247,17 +245,14 @@ wss.on('connection', (ws, req) => {
                                 return;
                             }
 
-                            // Controllo flessibile per ALZA IL VOLUME
                             if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('più alto') || rawText.includes('volume su')) {
                                 currentVolume = Math.min(100, currentVolume + 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
                             } 
-                            // Controllo flessibile per ABBASSA IL VOLUME
                             else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('più basso') || rawText.includes('volume giu') || rawText.includes('volume giù')) {
                                 currentVolume = Math.max(10, currentVolume - 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
                             } 
-                            // Domanda normale a Llama
                             else {
                                 ws.conversationHistory.push({ role: 'user', content: transcript });
                                 replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
@@ -286,17 +281,18 @@ wss.on('connection', (ws, req) => {
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 1024;
+                                // OTTIMIZZAZIONE: Chunk ingrandito a 4096 per alleggerire la pressione sull'ESP32
+                                const chunkSize = 4096;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
-                                    if (ws.bufferedAmount > 16384) {
-                                        await new Promise(resolve => setTimeout(resolve, 30));
+                                    if (ws.bufferedAmount > 32768) {
+                                        await new Promise(resolve => setTimeout(resolve, 50));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                await new Promise(resolve => setTimeout(resolve, 10));
+                                await new Promise(resolve => setTimeout(resolve, 20));
                             }
                         }
 
