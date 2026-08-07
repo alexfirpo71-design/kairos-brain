@@ -5,7 +5,7 @@ const { WebSocketServer } = require('ws');
 const app = express();
 const server = createServer(app);
 
-// Configurazione corretta del WebSocket Server che intercetta il percorso /ws
+// Inizializzazione WebSocket sul percorso /ws richiesto dall'ESP32
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 app.get('/', (req, res) => {
@@ -13,15 +13,13 @@ app.get('/', (req, res) => {
 });
 
 wss.on('connection', (ws, req) => {
-    console.log(`[WS] Dispositivo connesso da IP: ${req.socket.remoteAddress}`);
+    const ip = req.socket.remoteAddress;
+    console.log(`[WS] Dispositivo connesso da IP: ${ip}`);
 
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
-            // Qui ricevi l'audio binario dall'ESP32 (VAD o Pulsante)
-            console.log(`[WS] Ricevuti ${message.length} bytes di audio binario.`);
-            
-            // Esempio di risposta fittizia o inoltro a Groq/TTS
-            // ws.send(bufferAudioDiRisposta);
+            // Logica ricezione audio binario
+            console.log(`[WS] Ricevuti ${message.length} bytes di audio.`);
         } else {
             try {
                 const data = JSON.parse(message.toString());
@@ -31,21 +29,16 @@ wss.on('connection', (ws, req) => {
                     console.log('[Kairós] Stato: In ascolto...');
                 }
             } catch (e) {
-                console.log('[WS] Messaggio di testo grezzo:', message.toString());
+                console.log('[WS] Messaggio di testo:', message.toString());
             }
         }
     });
 
-    ws.on('close', () => {
-        console.log('[WS] Connessione chiusa dal client.');
-    });
-
-    ws.on('error', (error) => {
-        console.error('[WS Errore]:', error);
-    });
+    ws.on('close', () => console.log('[WS] Connessione chiusa.'));
+    ws.on('error', (err) => console.error('[WS Errore]:', err));
 });
 
-// Fondamentale: usa SEMPRE process.env.PORT per Render
+// Porta dinamica per Render, bind su 0.0.0.0 obbligatorio
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`==> Server Kairós avviato e in ascolto sulla porta ${PORT}`);
