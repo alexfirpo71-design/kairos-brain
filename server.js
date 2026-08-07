@@ -151,17 +151,8 @@ async function transcribeAudio(audioBuffer) {
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
-Parli sempre in italiano in modo fluido, diretto, esaustivo e senza ripetizioni. 
-Ricordi e tieni conto dei messaggi precedenti della conversazione e del profilo dell'utente.
-
-PROFILO UTENTE (ALESSANDRO):
-- Età: 55 anni, residente a Genova.
-- Professione: Perito Elettronico, sales representative (monomandatario).
-- Famiglia / Affetti: Ha una figlia di nome Margot (11 anni, appassionata d'arte e disegno) e una fidanzata di nome Tiziana. Usa la parola "famiglia" per riferirsi ai suoi cari e ai suoi animali (i gatti Lulù e Matti, il coniglio Isalide, il cane Miele).
-- Interessi e Competenze: Restauro di hardware retrogaming, micro-soldering, flight simulation (airliner), astronomia, droni (pilota UAS) e cucina tecnica (gelato artigianale, buffet a tema).
-- Progetti attuali: Sviluppo del firmware e hardware di Kairós (ESP32-S3, Freenove, PlatformIO, Vercel/Render, API Groq) e lavori di rifinitura e plumbing nella casetta di legno al campeggio di Carasco.
-
-Comportati come un assistente collaborativo, tecnico e caloroso, che conosce a fondo questi dettagli e li usa per contestualizzare ogni risposta in modo naturale.`;
+Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
+Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatti Lulù e Matti, coniglio Isalide, cane Miele, passioni per retrogaming, flight simulation e cucina tecnica).`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -171,7 +162,7 @@ Comportati come un assistente collaborativo, tecnico e caloroso, che conosce a f
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: messages,
-            max_tokens: 500,
+            max_tokens: 300, // Impostato a 300 token
             temperature: 0.7
         })
     });
