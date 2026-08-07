@@ -11,6 +11,9 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
+// Mappa globale per mantenere la cronologia persistente basata sul MAC del dispositivo
+const sessionHistories = new Map();
+
 function splitTextIntoChunks(text, maxLength = 250) {
     if (text.length <= maxLength) return [text];
     const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
@@ -80,7 +83,6 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        // Silenzio finale ampio per consentire all'hardware di chiudere la frase in dolcezza
         const silenceSamples = 8000; 
         let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
 
@@ -118,13 +120,13 @@ async function transcribeAudio(audioBuffer) {
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,            
-        1, 0,                   
-        1, 0,                   
+        16, 0, 0, 0,         
+        1, 0,                 
+        1, 0,                 
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,                   
-        16, 0,                  
+        2, 0,                 
+        16, 0,                
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -197,6 +199,15 @@ wss.on('connection', (ws, req) => {
                     ws.userName = data.user;
                 }
 
+                // Gestione della persistenza della cronologia basata sul MAC del dispositivo
+                if (data.mac) {
+                    ws.mac = data.mac;
+                    if (!sessionHistories.has(data.mac)) {
+                        sessionHistories.set(data.mac, []);
+                    }
+                    ws.conversationHistory = sessionHistories.get(data.mac);
+                }
+
                 if (data.mac || data.device || data.user || data.location || data.status) {
                     return;
                 }
@@ -252,7 +263,6 @@ wss.on('connection', (ws, req) => {
 
                         console.log("[WS] Streaming audio completato. Invio stop all'ESP32.");
                         
-                        // Invio esplicito dello stop per chiudere la riproduzione senza tagliare la fine
                         if (ws.readyState === ws.OPEN) {
                             ws.send(JSON.stringify({ action: 'stop' }));
                         }
@@ -274,4 +284,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server Kairós in ascolto sulla porta ${PORT}`));
+server.listen(PORT, () => console.log(`Server Kairos Brain in ascolto sulla porta ${PORT}`));
