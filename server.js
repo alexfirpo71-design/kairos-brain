@@ -153,10 +153,9 @@ async function transcribeAudio(audioBuffer) {
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Tu sei Kairós, l'assistente hardware e vocale di ${userName}. Non sei un'altra IA, non sei ChatGPT e non sei Gemini: sei Kairós, un sistema integrato locale.
-REGOLE TASSATIVE:
-- Rispondi sempre in italiano naturale, diretto e senza mai confondere la tua identità.
-- Se la richiesta è semplice o un comando, rispondi con una o due frasi secche. 
-- Se ti viene chiesto codice o analisi tecnica, sii completo.
+REGOLE DI STILE:
+- Se la richiesta è semplice, un comando o una domanda rapida, rispondi in modo lapidario e secco (massimo una o due frasi).
+- Se ti viene chiesto esplicitamente codice, calcoli o un approfondimento tecnico, sii completo ed esaustivo.
 Profilo utente: 55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatta Lulù, coniglio Isalide, cane Miele, passioni retrogaming, flight simulation e cucina tecnica.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
@@ -168,7 +167,7 @@ Profilo utente: 55 anni, perito elettronico, sales representative a Genova, figl
             model: 'llama-3.1-8b-instant',
             messages: messages,
             max_tokens: 300,
-            temperature: 0.2
+            temperature: 0.3
         })
     });
 
@@ -270,7 +269,6 @@ wss.on('connection', (ws, req) => {
                     }
 
                     ws.isSpeaking = true;
-                    // Inviamo il JSON con il testo in modo che l'ESP32 possa stamparlo sul monitor
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
                     try {
@@ -281,17 +279,17 @@ wss.on('connection', (ws, req) => {
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 256; // Ridotto a 256 per alleggerire la coda sulla scheda
+                                const chunkSize = 1024;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
-                                    if (ws.bufferedAmount > 4096) {
-                                        await new Promise(resolve => setTimeout(resolve, 60)); // Pausa di sicurezza più ampia
+                                    if (ws.bufferedAmount > 16384) {
+                                        await new Promise(resolve => setTimeout(resolve, 30));
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                await new Promise(resolve => setTimeout(resolve, 40)); 
+                                await new Promise(resolve => setTimeout(resolve, 10));
                             }
                         }
 
