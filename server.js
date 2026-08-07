@@ -152,12 +152,12 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Sei Kairós, l'assistente IA di ${userName}. 
-Parli sempre in italiano corretto, naturale e fluido. 
-REGOLE DI STILE:
-- Sii diretto e conciso per le domande semplici o i comandi, senza giri di parole inutili.
-- Se ti viene chiesto un approfondimento tecnico, del codice o un'analisi, fornisci una risposta completa ed esauriente.
-Profilo utente: 55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatta Lulù, coniglio Isalide, cane Miele, passioni per retrogaming, flight simulation e cucina tecnica.`;
+    const systemPrompt = `Tu sei Kairós, l'assistente hardware e vocale di ${userName}. Non sei un'altra IA, non sei ChatGPT e non sei Gemini: sei Kairós, un sistema integrato locale.
+REGOLE TASSATIVE:
+- Rispondi sempre in italiano naturale, diretto e senza mai confondere la tua identità.
+- Se la richiesta è semplice o un comando, rispondi con una o due frasi secche. 
+- Se ti viene chiesto codice o analisi tecnica, sii completo.
+Profilo utente: 55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatta Lulù, coniglio Isalide, cane Miele, passioni retrogaming, flight simulation e cucina tecnica.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -168,7 +168,7 @@ Profilo utente: 55 anni, perito elettronico, sales representative a Genova, figl
             model: 'llama-3.1-8b-instant',
             messages: messages,
             max_tokens: 300,
-            temperature: 0.3
+            temperature: 0.2
         })
     });
 
@@ -280,7 +280,7 @@ wss.on('connection', (ws, req) => {
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 512; // Streaming più leggero e stabile
+                                const chunkSize = 512;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
