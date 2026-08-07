@@ -11,10 +11,7 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Mappa globale per la cronologia persistente basata sul MAC
 const sessionHistories = new Map();
-
-// Gestione globale del volume (valore percentuale da 0 a 100, default 70)
 let currentVolume = 70;
 
 function splitTextIntoChunks(text, maxLength = 250) {
@@ -63,7 +60,6 @@ async function getSingleTtsPcm(textChunk, volumePercent) {
         const arrayBuffer = await response.arrayBuffer();
         const mp3Buffer = Buffer.from(arrayBuffer);
 
-        // Calcola il guadagno audio (volume) in base alla percentuale (da 0.1 a 2.0)
         const volumeFactor = Math.max(0.05, volumePercent / 70);
 
         const pcmBuffer = await new Promise((resolve, reject) => {
@@ -187,6 +183,7 @@ wss.on('connection', (ws, req) => {
     console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.userName = "Alessandro";
     ws.conversationHistory = [];
+    ws.isSpeaking = false; // Flag per tracciare se sta inviando audio
     let audioBuffer = [];
 
     ws.isAlive = true;
@@ -203,20 +200,20 @@ wss.on('connection', (ws, req) => {
 
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
+            // Se sta parlando e riceve altra voce (es. un comando di stop pronunciato sopra), interrompe
             audioBuffer.push(message);
         } else {
             try {
                 const data = JSON.parse(message.toString());
                 
                 if (data.action === 'stop') {
-                    console.log("[WS] Ricevuto comando di stop manuale/remoto.");
+                    console.log("[WS] Comando di stop ricevuto dall'ESP32.");
+                    ws.isSpeaking = false;
                     audioBuffer = [];
                     return;
                 }
 
-                if (data.user) {
-                    ws.userName = data.user;
-                }
+                if (data.user) ws.userName = data.user;
 
                 if (data.mac) {
                     ws.mac = data.mac;
@@ -242,20 +239,20 @@ wss.on('connection', (ws, req) => {
                         if (transcript && transcript.trim().length > 0) {
                             const lowerTranscript = transcript.toLowerCase().trim();
 
-                            // Gestione Comando STOP vocale
-                            if (lowerTranscript === 'stop' || lowerTranscript === 'fermati' || lowerTranscript === 'basta') {
-                                replyText = "Fatto.";
-                                ws.send(JSON.stringify({ action: 'stop', state: 'idle', text: replyText }));
+                            // Interrompi subito se l'utente dice stop / fermati / basta
+                            if (lowerTranscript.includes('stop') || lowerTranscript.includes('fermati') || lowerTranscript.includes('basta')) {
+                                ws.isSpeaking = false;
+                                ws.send(JSON.stringify({ action: 'stop' }));
                                 return;
                             }
 
-                            // Gestione Comandi Volume Vocali
+                            // Gestione immediata del volume
                             if (lowerTranscript.includes('alza il volume') || lowerTranscript.includes('più alto')) {
                                 currentVolume = Math.min(100, currentVolume + 15);
-                                replyText = `Volume impostato al ${currentVolume} percento.`;
+                                replyText = `Volume al ${currentVolume} per cento.`;
                             } else if (lowerTranscript.includes('abbassa il volume') || lowerTranscript.includes('più basso')) {
                                 currentVolume = Math.max(10, currentVolume - 15);
-                                replyText = `Volume impostato al ${currentVolume} percento.`;
+                                replyText = `Volume al ${currentVolume} per cento.`;
                             } else {
                                 ws.conversationHistory.push({ role: 'user', content: transcript });
                                 replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
@@ -266,25 +263,27 @@ wss.on('connection', (ws, req) => {
                                 }
                             }
 
-                            console.log(`[Llama/Command] Risposta: "${replyText}" (Volume: ${currentVolume}%)`);
+                            console.log(`[Elaborato] Risposta: "${replyText}" | Volume attuale: ${currentVolume}%`);
                         }
                     } catch (err) {
                         console.error("[Errore IA]", err);
                         replyText = "Si è verificato un errore di elaborazione.";
                     }
 
+                    ws.isSpeaking = true;
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 250);
                         
                         for (let chunk of textChunks) {
-                            if (ws.readyState !== ws.OPEN) break;
+                            if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
+                            
                             if (pcmPart && pcmPart.length > 0) {
                                 const chunkSize = 1024;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                    if (ws.readyState !== ws.OPEN) break;
+                                    if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
                                     if (ws.bufferedAmount > 16384) {
                                         await new Promise(resolve => setTimeout(resolve, 30));
@@ -296,14 +295,17 @@ wss.on('connection', (ws, req) => {
                             }
                         }
 
-                        console.log("[WS] Streaming audio completato. Invio stop all'ESP32.");
-                        
-                        if (ws.readyState === ws.OPEN) {
-                            ws.send(JSON.stringify({ action: 'stop' }));
+                        if (ws.isSpeaking) {
+                            console.log("[WS] Streaming audio completato.");
+                            if (ws.readyState === ws.OPEN) {
+                                ws.send(JSON.stringify({ action: 'stop' }));
+                            }
                         }
+                        ws.isSpeaking = false;
 
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
+                        ws.isSpeaking = false;
                     }
                 }
             } catch (e) {
@@ -314,6 +316,7 @@ wss.on('connection', (ws, req) => {
 
     ws.on('close', () => {
         clearInterval(pingInterval);
+        ws.isSpeaking = false;
         console.log("[WS] Connessione chiusa.");
     });
 });
