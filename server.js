@@ -154,7 +154,7 @@ async function getGroqChatResponse(conversationHistory, userName = "Alessandro")
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
-Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatti Lulù e Matti, coniglio Isalide, cane Miele, passioni per retrogaming, flight simulation e cucina tecnica).`;
+Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatti Lulù, coniglio Isalide, cane Miele, la povera Prugna detta Prugnetta mancata il 11 maggio 2026, passioni per retrogaming, flight simulation e cucina tecnica).`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -274,7 +274,7 @@ wss.on('connection', (ws, req) => {
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
                     try {
-                        const textChunks = splitTextIntoChunks(replyText, 250);
+                        const textChunks = splitTextIntoChunks(replyText, 600);
                         
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
