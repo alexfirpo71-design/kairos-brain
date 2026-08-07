@@ -270,6 +270,7 @@ wss.on('connection', (ws, req) => {
                     }
 
                     ws.isSpeaking = true;
+                    // Inviamo il JSON con il testo in modo che l'ESP32 possa stamparlo sul monitor
                     ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
                     try {
@@ -280,17 +281,17 @@ wss.on('connection', (ws, req) => {
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             
                             if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 512;
+                                const chunkSize = 256; // Ridotto a 256 per alleggerire la coda sulla scheda
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
-                                    if (ws.bufferedAmount > 8192) {
-                                        await new Promise(resolve => setTimeout(resolve, 50)); 
+                                    if (ws.bufferedAmount > 4096) {
+                                        await new Promise(resolve => setTimeout(resolve, 60)); // Pausa di sicurezza più ampia
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + chunkSize));
                                 }
-                                await new Promise(resolve => setTimeout(resolve, 30)); 
+                                await new Promise(resolve => setTimeout(resolve, 40)); 
                             }
                         }
 
