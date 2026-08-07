@@ -11,10 +11,9 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Mappa globale per mantenere la cronologia persistente basata sul MAC del dispositivo
 const sessionHistories = new Map();
 
-function splitTextIntoChunks(text, maxLength = 250) {
+function splitTextIntoChunks(text, maxLength = 200) {
     if (text.length <= maxLength) return [text];
     const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
     let chunks = [];
@@ -83,10 +82,10 @@ async function getSingleTtsPcm(textChunk) {
             ffmpeg.stdin.end();
         });
 
-        const silenceSamples = 8000; 
+        const silenceSamples = 4000; 
         let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
 
-        const fadeSamplesIn = Math.min(240, paddedPcmBuffer.length / 2);
+        const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = paddedPcmBuffer.readInt16LE(i * 2);
             const multiplier = i / fadeSamplesIn;
@@ -104,7 +103,7 @@ async function getSingleTtsPcm(textChunk) {
 
         return paddedPcmBuffer;
     } catch (err) {
-        console.error("[Errore TTS Singolo]", err.message);
+        console.error("[Errore TTS Singolo]:", err.message);
         return null;
     }
 }
@@ -120,13 +119,13 @@ async function transcribeAudio(audioBuffer) {
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,         
-        1, 0,               
-        1, 0,               
+        16, 0, 0, 0,          
+        1, 0,                 
+        1, 0,                 
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,               
-        16, 0,              
+        2, 0,                 
+        16, 0,                
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -143,19 +142,24 @@ async function transcribeAudio(audioBuffer) {
         body: formData
     });
 
-    if (!response.ok) throw new Error(`Errore Whisper: ${response.status}`);
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Errore Whisper HTTP ${response.status}: ${errorBody}`);
+    }
     const data = await response.json();
     return data.text;
 }
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error("GROQ_API_KEY mancante.");
+
     const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo fluido, diretto, esaustivo e senza ripetizioni. 
 Ricordi e tieni conto dei messaggi precedenti della conversazione e del profilo dell'utente.
 
 PROFILO UTENTE (ALESSANDRO):
-- Età: 55 anni, residente a Genova.
+- Età: 55 anni, residente a Genova e Valbrevenna.
 - Professione: Perito Elettronico, sales representative (monomandatario).
 - Famiglia / Affetti: Ha una figlia di nome Margot (11 anni, appassionata d'arte e disegno) e una fidanzata di nome Tiziana. Usa la parola "famiglia" per riferirsi ai suoi cari e ai suoi animali (i gatti Lulù e Matti, il coniglio Isalide, il cane Miele).
 - Interessi e Competenze: Restauro di hardware retrogaming, micro-soldering, flight simulation (airliner), astronomia, droni (pilota UAS) e cucina tecnica (gelato artigianale, buffet a tema).
@@ -176,7 +180,10 @@ Comportati come un assistente collaborativo, tecnico e caloroso, che conosce a f
         })
     });
 
-    if (!response.ok) throw new Error(`Errore Chat: ${response.status}`);
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Errore Chat HTTP ${response.status}: ${errorBody}`);
+    }
     const data = await response.json();
     return data.choices[0].message.content;
 }
@@ -185,7 +192,7 @@ wss.on('connection', (ws, req) => {
     console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.userName = "Alessandro";
     ws.conversationHistory = [];
-    let audioBuffer = [];
+    let audioChunks = [];
 
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
@@ -201,89 +208,98 @@ wss.on('connection', (ws, req) => {
 
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
-            audioBuffer.push(message);
+            audioChunks.push(Buffer.isBuffer(message) ? message : Buffer.from(message));
         } else {
             try {
-                const data = JSON.parse(message.toString());
-                
-                if (data.user) {
-                    ws.userName = data.user;
-                }
-
-                // Gestione della persistenza della cronologia basata sul MAC del dispositivo
-                if (data.mac) {
-                    ws.mac = data.mac;
-                    if (!sessionHistories.has(data.mac)) {
-                        sessionHistories.set(data.mac, []);
-                    }
-                    ws.conversationHistory = sessionHistories.get(data.mac);
-                }
-
-                if (data.mac || data.device || data.user || data.location || data.status) {
-                    return;
-                }
-
-                if (data.state === 'processing') {
-                    const completeAudioBuffer = Buffer.concat(audioBuffer);
-                    audioBuffer = [];
-
-                    let replyText = "Ricevuto.";
-                    try {
-                        const transcript = await transcribeAudio(completeAudioBuffer);
-                        console.log(`[Whisper] Trascritto: "${transcript}"`);
-                        
-                        if (transcript && transcript.trim().length > 0) {
-                            ws.conversationHistory.push({ role: 'user', content: transcript });
-
-                            replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                            console.log(`[Llama] Risposta: "${replyText}"`);
-
-                            ws.conversationHistory.push({ role: 'assistant', content: replyText });
-
-                            if (ws.conversationHistory.length > 10) {
-                                ws.conversationHistory = ws.conversationHistory.slice(-10);
-                            }
+                const textMsg = message.toString();
+                if (textMsg.startsWith('{')) {
+                    const data = JSON.parse(textMsg);
+                    
+                    if (data.user) ws.userName = data.user;
+                    if (data.mac) {
+                        ws.mac = data.mac;
+                        if (!sessionHistories.has(data.mac)) {
+                            sessionHistories.set(data.mac, []);
                         }
-                    } catch (err) {
-                        console.error("[Errore IA]", err);
-                        replyText = "Si è verificato un errore di elaborazione.";
+                        ws.conversationHistory = sessionHistories.get(data.mac);
                     }
 
-                    ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
+                    if (data.state === 'listening') {
+                        audioChunks = []; // Pulisce il buffer all'avvio dell'ascolto
+                    }
 
-                    try {
-                        const textChunks = splitTextIntoChunks(replyText, 250);
+                    if (data.state === 'processing') {
+                        const completeAudioBuffer = Buffer.concat(audioChunks);
+                        audioChunks = [];
+
+                        let replyText = "Ricevuto.";
                         
-                        for (let chunk of textChunks) {
-                            if (ws.readyState !== ws.OPEN) break;
-                            const pcmPart = await getSingleTtsPcm(chunk);
-                            if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 1024;
-                                for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                    if (ws.readyState !== ws.OPEN) break;
-                                    
-                                    if (ws.bufferedAmount > 16384) {
-                                        await new Promise(resolve => setTimeout(resolve, 30));
+                        try {
+                            console.log(`[Whisper] Elaborazione audio: ${completeAudioBuffer.length} bytes`);
+                            
+                            if (completeAudioBuffer.length < 500) {
+                                console.log("[Whisper] Audio troppo corto, scartato.");
+                                replyText = "Non ho registrato alcun audio percepibile.";
+                            } else {
+                                const transcript = await transcribeAudio(completeAudioBuffer);
+                                console.log(`[Whisper] Trascritto: "${transcript}"`);
+                                
+                                if (transcript && transcript.trim().length > 0) {
+                                    ws.conversationHistory.push({ role: 'user', content: transcript });
+
+                                    replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                                    console.log(`[Llama] Risposta: "${replyText}"`);
+
+                                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
+
+                                    if (ws.conversationHistory.length > 10) {
+                                        ws.conversationHistory = ws.conversationHistory.slice(-10);
                                     }
-                                    
-                                    ws.send(pcmPart.subarray(i, i + chunkSize));
+                                } else {
+                                    replyText = "Non ho capito cosa hai detto, potresti ripetere?";
                                 }
-                                await new Promise(resolve => setTimeout(resolve, 10));
                             }
+                        } catch (err) {
+                            console.error("[Errore Pipeline IA]:", err.message);
+                            replyText = "Si è verificato un errore di elaborazione interno.";
                         }
 
-                        console.log("[WS] Streaming audio completato. Invio stop all'ESP32.");
-                        
-                        if (ws.readyState === ws.OPEN) {
-                            ws.send(JSON.stringify({ action: 'stop' }));
-                        }
+                        // Notifica l'ESP32 che stiamo per inviare la risposta
+                        ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
 
-                    } catch (streamErr) {
-                        console.error("[Errore Streaming Audio]", streamErr);
+                        try {
+                            const textChunks = splitTextIntoChunks(replyText, 200);
+                            
+                            for (let chunk of textChunks) {
+                                if (ws.readyState !== ws.OPEN) break;
+                                const pcmPart = await getSingleTtsPcm(chunk);
+                                if (pcmPart && pcmPart.length > 0) {
+                                    const chunkSize = 1024;
+                                    for (let i = 0; i < pcmPart.length; i += chunkSize) {
+                                        if (ws.readyState !== ws.OPEN) break;
+                                        
+                                        if (ws.bufferedAmount > 16384) {
+                                            await new Promise(resolve => setTimeout(resolve, 20));
+                                        }
+                                        
+                                        ws.send(pcmPart.subarray(i, i + chunkSize));
+                                    }
+                                    await new Promise(resolve => setTimeout(resolve, 5));
+                                }
+                            }
+
+                            console.log("[WS] Streaming audio completato. Invio stop.");
+                            if (ws.readyState === ws.OPEN) {
+                                ws.send(JSON.stringify({ action: 'stop' }));
+                            }
+
+                        } catch (streamErr) {
+                            console.error("[Errore Streaming Audio]:", streamErr.message);
+                        }
                     }
                 }
             } catch (e) {
-                console.log('[WS Testo]', message.toString());
+                console.log('[WS Messaggio non JSON]:', message.toString());
             }
         }
     });
@@ -295,4 +311,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Kairos Brain Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Kairos Brain Server in ascolto sulla porta ${PORT}`));
