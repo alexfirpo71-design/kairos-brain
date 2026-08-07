@@ -152,11 +152,11 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Tu sei Kairós, l'assistente hardware e vocale di ${userName}. Non sei un'altra IA, non sei ChatGPT e non sei Gemini: sei Kairós, un sistema integrato locale.
-REGOLE DI STILE:
-- Se la richiesta è semplice, un comando o una domanda rapida, rispondi in modo lapidario e secco (massimo una o due frasi).
-- Se ti viene chiesto esplicitamente codice, calcoli o un approfondimento tecnico, sii completo ed esaustivo.
-Profilo utente: 55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatta Lulù, coniglio Isalide, cane Miele, passioni retrogaming, flight simulation e cucina tecnica.`;
+    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
+REGOLA DI STILE DINAMICA:
+- Se ti viene fatta una domanda semplice, un comando o una richiesta rapida, rispondi SEMPRE in modo lapidario, secco e con un massimo di una o due frasi. Zero chit-chat, zero convenevoli.
+- Se invece ti viene chiesto esplicitamente un approfondimento tecnico, un calcolo, un testo lungo o del codice, allora puoi essere completo ed esaustivo sfruttando lo spazio necessario.
+Profilo utente: 55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatti Lulù e Matti, coniglio Isalide, cane Miele, passioni per retrogaming, flight simulation e cucina tecnica.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -208,6 +208,7 @@ wss.on('connection', (ws, req) => {
                 const data = JSON.parse(message.toString());
                 
                 if (data.action === 'stop') {
+                    console.log("[WS] Comando di stop ricevuto dall'ESP32.");
                     ws.isSpeaking = false;
                     audioBuffer = [];
                     return;
@@ -242,6 +243,7 @@ wss.on('connection', (ws, req) => {
                             if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
                                 ws.isSpeaking = false;
                                 ws.send(JSON.stringify({ action: 'stop' }));
+                                console.log("[Comando] Interruzione eseguita.");
                                 return;
                             }
 
@@ -262,10 +264,12 @@ wss.on('connection', (ws, req) => {
                                     ws.conversationHistory = ws.conversationHistory.slice(-10);
                                 }
                             }
+
+                            console.log(`[Elaborato] Risposta: "${replyText}" | Volume: ${currentVolume}%`);
                         }
                     } catch (err) {
                         console.error("[Errore IA]", err);
-                        replyText = "Si è verificato un errore.";
+                        replyText = "Si è verificato un errore di elaborazione.";
                     }
 
                     ws.isSpeaking = true;
@@ -294,6 +298,7 @@ wss.on('connection', (ws, req) => {
                         }
 
                         if (ws.isSpeaking) {
+                            console.log("[WS] Streaming audio completato.");
                             if (ws.readyState === ws.OPEN) {
                                 ws.send(JSON.stringify({ action: 'stop' }));
                             }
@@ -301,6 +306,7 @@ wss.on('connection', (ws, req) => {
                         ws.isSpeaking = false;
 
                     } catch (streamErr) {
+                        console.error("[Errore Streaming Audio]", streamErr);
                         ws.isSpeaking = false;
                     }
                 }
@@ -313,6 +319,7 @@ wss.on('connection', (ws, req) => {
     ws.on('close', () => {
         clearInterval(pingInterval);
         ws.isSpeaking = false;
+        console.log("[WS] Connessione chiusa.");
     });
 });
 
