@@ -11,8 +11,6 @@ const server = createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-const sessionHistories = new Map();
-
 function splitTextIntoChunks(text, maxLength = 200) {
     if (text.length <= maxLength) return [text];
     const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
@@ -84,23 +82,6 @@ async function getSingleTtsPcm(textChunk) {
 
         const silenceSamples = 4000; 
         let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
-
-        const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
-        for (let i = 0; i < fadeSamplesIn; i++) {
-            const sample = paddedPcmBuffer.readInt16LE(i * 2);
-            const multiplier = i / fadeSamplesIn;
-            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
-        }
-
-        const fadeSamplesOut = silenceSamples;
-        const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
-        for (let i = 0; i < fadeSamplesOut; i++) {
-            const idx = (startOutIdx + i) * 2;
-            const sample = paddedPcmBuffer.readInt16LE(idx);
-            const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
-            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
-        }
-
         return paddedPcmBuffer;
     } catch (err) {
         console.error("[Errore TTS Singolo]:", err.message);
@@ -154,19 +135,7 @@ async function getGroqChatResponse(conversationHistory, userName = "Alessandro")
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) throw new Error("GROQ_API_KEY mancante.");
 
-    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
-Parli sempre in italiano in modo fluido, diretto, esaustivo e senza ripetizioni. 
-Ricordi e tieni conto dei messaggi precedenti della conversazione e del profilo dell'utente.
-
-PROFILO UTENTE (ALESSANDRO):
-- Età: 55 anni, residente a Genova e Valbrevenna.
-- Professione: Perito Elettronico, sales representative (monomandatario).
-- Famiglia / Affetti: Ha una figlia di nome Margot (11 anni, appassionata d'arte e disegno) e una fidanzata di nome Tiziana. Usa la parola "famiglia" per riferirsi ai suoi cari e ai suoi animali (i gatti Lulù e Matti, il coniglio Isalide, il cane Miele).
-- Interessi e Competenze: Restauro di hardware retrogaming, micro-soldering, flight simulation (airliner), astronomia, droni (pilota UAS) e cucina tecnica (gelato artigianale, buffet a tema).
-- Progetti attuali: Sviluppo del firmware e hardware di Kairós (ESP32-S3, Freenove, PlatformIO, Vercel/Render, API Groq) e lavori di rifinitura e plumbing nella casetta di legno al campeggio di Carasco.
-
-Comportati come un assistente collaborativo, tecnico e caloroso, che conosce a fondo questi dettagli e li usa per contestualizzare ogni risposta in modo naturale.`;
-
+    const systemPrompt = `Sei Kairós, l'assistente IA di ${userName}. Rispondi sempre in italiano in modo diretto e tecnico.`;
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -175,7 +144,7 @@ Comportati come un assistente collaborativo, tecnico e caloroso, che conosce a f
         body: JSON.stringify({
             model: 'llama-3.3-70b-versatile',
             messages: messages,
-            max_tokens: 500,
+            max_tokens: 300,
             temperature: 0.7
         })
     });
@@ -195,122 +164,71 @@ wss.on('connection', (ws, req) => {
     let audioChunks = [];
     let isProcessing = false;
 
-    ws.isAlive = true;
-    ws.on('pong', () => { ws.isAlive = true; });
-
-    const pingInterval = setInterval(() => {
-        if (ws.isAlive === false) {
-            clearInterval(pingInterval);
-            return ws.terminate();
-        }
-        ws.isAlive = false;
-        ws.ping();
-    }, 30000);
-
-    async function processAccumulatedAudio() {
-        if (isProcessing || audioChunks.length === 0) return;
-        isProcessing = true;
-        
-        const completeAudioBuffer = Buffer.concat(audioChunks);
-        audioChunks = [];
-
-        let replyText = "Ricevuto.";
-        
-        try {
-            console.log(`[Whisper] Elaborazione audio: ${completeAudioBuffer.length} bytes`);
-            
-            if (completeAudioBuffer.length < 500) {
-                console.log("[Whisper] Audio troppo corto, scartato.");
-                isProcessing = false;
-                return;
-            }
-
-            const transcript = await transcribeAudio(completeAudioBuffer);
-            console.log(`[Whisper] Trascritto: "${transcript}"`);
-            
-            if (transcript && transcript.trim().length > 0) {
-                ws.conversationHistory.push({ role: 'user', content: transcript });
-
-                replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                console.log(`[Llama] Risposta: "${replyText}"`);
-
-                ws.conversationHistory.push({ role: 'assistant', content: replyText });
-
-                if (ws.conversationHistory.length > 10) {
-                    ws.conversationHistory = ws.conversationHistory.slice(-10);
-                }
-            } else {
-                replyText = "Non ho capito cosa hai detto, potresti ripetere?";
-            }
-        } catch (err) {
-            console.error("[Errore Pipeline IA]:", err.message);
-            replyText = "Si è verificato un errore di elaborazione interno.";
-        }
-
-        if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
-        }
-
-        try {
-            const textChunks = splitTextIntoChunks(replyText, 200);
-            
-            for (let chunk of textChunks) {
-                if (ws.readyState !== ws.OPEN) break;
-                const pcmPart = await getSingleTtsPcm(chunk);
-                if (pcmPart && pcmPart.length > 0) {
-                    const chunkSize = 1024;
-                    for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                        if (ws.readyState !== ws.OPEN) break;
-                        
-                        if (ws.bufferedAmount > 16384) {
-                            await new Promise(resolve => setTimeout(resolve, 20));
-                        }
-                        
-                        ws.send(pcmPart.subarray(i, i + chunkSize));
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 5));
-                }
-            }
-
-            console.log("[WS] Streaming audio completato. Invio stop.");
-            if (ws.readyState === ws.OPEN) {
-                ws.send(JSON.stringify({ action: 'stop' }));
-            }
-
-        } catch (streamErr) {
-            console.error("[Errore Streaming Audio]:", streamErr.message);
-        } finally {
-            isProcessing = false;
-        }
-    }
-
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
-            if (!isProcessing) {
-                audioChunks.push(Buffer.isBuffer(message) ? message : Buffer.from(message));
-            }
+            audioChunks.push(Buffer.isBuffer(message) ? message : Buffer.from(message));
         } else {
             try {
                 const textMsg = message.toString();
                 if (textMsg.startsWith('{')) {
                     const data = JSON.parse(textMsg);
                     
-                    if (data.user) ws.userName = data.user;
-                    if (data.mac) {
-                        ws.mac = data.mac;
-                        if (!sessionHistories.has(data.mac)) {
-                            sessionHistories.set(data.mac, []);
-                        }
-                        ws.conversationHistory = sessionHistories.get(data.mac);
-                    }
-
                     if (data.state === 'listening') {
                         audioChunks = [];
                         isProcessing = false;
                     }
 
-                    if (data.state === 'processing') {
-                        await processAccumulatedAudio();
+                    if (data.state === 'processing' && !isProcessing) {
+                        isProcessing = true;
+                        const completeAudioBuffer = Buffer.concat(audioChunks);
+                        audioChunks = []; // Svuota subito per evitare doppie elaborazioni
+
+                        let replyText = "Ricevuto.";
+                        try {
+                            console.log(`[Whisper] Elaborazione audio: ${completeAudioBuffer.length} bytes`);
+                            if (completeAudioBuffer.length > 500) {
+                                const transcript = await transcribeAudio(completeAudioBuffer);
+                                console.log(`[Whisper] Trascritto: "${transcript}"`);
+                                
+                                if (transcript && transcript.trim().length > 0) {
+                                    ws.conversationHistory.push({ role: 'user', content: transcript });
+                                    replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                                } else {
+                                    replyText = "Non ho udito chiaramente, potresti ripetere?";
+                                }
+                            } else {
+                                replyText = "Registrazione troppo corta.";
+                            }
+                        } catch (err) {
+                            console.error("[ERRORE PIPELINE SERVER]:", err);
+                            replyText = "Si è verificato un errore di elaborazione interno.";
+                        }
+
+                        if (ws.readyState === ws.OPEN) {
+                            ws.send(JSON.stringify({ action: 'speak', text: replyText }));
+                        }
+
+                        try {
+                            const textChunks = splitTextIntoChunks(replyText, 200);
+                            for (let chunk of textChunks) {
+                                if (ws.readyState !== ws.OPEN) break;
+                                const pcmPart = await getSingleTtsPcm(chunk);
+                                if (pcmPart && pcmPart.length > 0) {
+                                    for (let i = 0; i < pcmPart.length; i += 1024) {
+                                        if (ws.readyState !== ws.OPEN) break;
+                                        ws.send(pcmPart.subarray(i, i + 1024));
+                                    }
+                                }
+                            }
+                            if (ws.readyState === ws.OPEN) {
+                                ws.send(JSON.stringify({ action: 'stop' }));
+                            }
+                        } catch (streamErr) {
+                            console.error("[Errore Streaming Audio]:", streamErr);
+                        } finally {
+                            isProcessing = false;
+                        }
                     }
                 }
             } catch (e) {
@@ -320,7 +238,6 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
-        clearInterval(pingInterval);
         console.log("[WS] Connessione chiusa.");
     });
 });
