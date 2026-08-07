@@ -160,14 +160,19 @@ Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettron
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
+            model: 'llama-3.1-8b-instant', // Modello aggiornato per evitare blocchi 429
             messages: messages,
-            max_tokens: 300, // Impostato a 300 token
+            max_tokens: 300,
             temperature: 0.7
         })
     });
 
-    if (!response.ok) throw new Error(`Errore Chat: ${response.status}`);
+    if (!response.ok) {
+        if (response.status === 429) {
+            throw new Error("Troppe richieste in corso. Attendi qualche secondo.");
+        }
+        throw new Error(`Errore Chat: ${response.status}`);
+    }
     const data = await response.json();
     return data.choices[0].message.content;
 }
