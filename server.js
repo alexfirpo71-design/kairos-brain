@@ -202,7 +202,7 @@ async function handleCameraTrigger(ws) {
         const imageBuffer = await camResponse.buffer();
         const base64Image = imageBuffer.toString('base64');
         
-        console.log("[Camera] Immagine catturata (dimensione bytes:", imageBuffer.length, "), invio a Groq Vision isolato...");
+        console.log("[Camera] Immagine catturata (dimensione bytes:", imageBuffer.length, "), invio a Groq Vision...");
         const apiKey = process.env.GROQ_API_KEY;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -210,20 +210,20 @@ async function handleCameraTrigger(ws) {
             messages: [
                 {
                     role: 'system',
-                    content: 'Sei una telecamera di sicurezza cieca e distaccata. Descrivi solo ed esclusivamente gli oggetti fisici geometrici macroscopici presenti nella stanza (es. muro bianco, sedia nera, tavolo in legno). Ti è severamente vietato fare ipotesi, inventare nomi di persone, nomi di animali, riferimenti a hobby o passioni. Se l immagine non mostra chiaramente un oggetto comune in primo piano, rispondi solo: "Inquadratura non definita."'
+                    content: 'Sei un sensore ottico binario. Non devi interpretare la scena, non devi usare la creatività, non devi indovinare. Se l immagine non è un quadro chiaro e definito, rispondi unicamente con la stringa esatta: ERRORE_OFFLINE.'
                 },
                 {
                     role: 'user',
                     content: [
                         { 
                             type: 'text', 
-                            text: 'Cosa c è esattamente in questa foto? Sii estremamente sintetico e fattuale.' 
+                            text: 'Cosa cè in questa foto? Se hai il minimo dubbio rispondi solo ERRORE_OFFLINE.' 
                         },
                         { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                     ]
                 }
             ],
-            max_tokens: 40,
+            max_tokens: 30,
             temperature: 0.0
         });
 
@@ -231,7 +231,12 @@ async function handleCameraTrigger(ws) {
         const visionData = await visionResponse.json();
         let resultText = visionData.choices[0].message.content.trim();
         
-        console.log(`[Vision Risposta Pulita] "${resultText}"`);
+        console.log(`[Vision Risposta] "${resultText}"`);
+
+        if (resultText.includes('ERRORE_OFFLINE') || resultText.length < 5) {
+            return "Segnale video non interpretabile o inquadratura non definita.";
+        }
+
         return resultText;
     } catch (err) {
         console.error("[Errore Camera/Vision]", err.message);
