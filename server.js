@@ -48,7 +48,6 @@ function splitTextIntoChunks(text, maxLength = 250) {
 
 async function getSingleTtsPcm(textChunk, volumePercent) {
     try {
-        // Corregge la pronuncia di Kairós per Google TTS evitando che dica "Kers"
         const speechFriendlyText = textChunk
             .replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
 
@@ -134,12 +133,12 @@ async function transcribeAudio(audioBuffer) {
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
         16, 0, 0, 0,        
-        1, 0,                
-        1, 0,                
+        1, 0,              
+        1, 0,              
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,                
-        16, 0,                
+        2, 0,              
+        16, 0,              
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -193,6 +192,46 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
     return data.choices[0].message.content;
 }
 
+async function handleCameraTrigger(ws) {
+    const cameraUrl = "http://192.168.1.152:8080/shot.jpg";
+    console.log("[Camera] Contattando la telecamera IP...");
+    try {
+        const camResponse = await fetch(cameraUrl, { timeout: 5000 });
+        if (!camResponse.ok) throw new Error(`HTTP error! status: ${camResponse.status}`);
+        
+        const imageBuffer = await camResponse.buffer();
+        const base64Image = imageBuffer.toString('base64');
+        
+        console.log("[Camera] Immagine catturata, invio a Groq Vision...");
+        const apiKey = process.env.GROQ_API_KEY;
+        
+        const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'llama-3.2-11b-vision-preview',
+                messages: [
+                    {
+                        role: 'user',
+                        content: [
+                            { type: 'text', text: 'Analizza questa immagine e descrivi cosa vedi in modo sintetico e diretto in italiano.' },
+                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+                        ]
+                    }
+                ],
+                max_tokens: 200
+            })
+        });
+
+        if (!visionResponse.ok) throw new Error(`Errore Vision API: ${visionResponse.status}`);
+        const visionData = await visionResponse.json();
+        return visionData.choices[0].message.content;
+    } catch (err) {
+        console.error("[Errore Camera/Vision]", err.message);
+        return "Non sono riuscito a stabilire il collegamento con la telecamera o ad analizzare l'immagine.";
+    }
+}
+
 wss.on('connection', (ws, req) => {
     console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.userName = "Alessandro";
@@ -223,6 +262,41 @@ wss.on('connection', (ws, req) => {
                     console.log("[WS] Comando di stop ricevuto dall'ESP32.");
                     ws.isSpeaking = false;
                     audioBuffer = [];
+                    return;
+                }
+
+                if (data.action === 'trigger_camera') {
+                    console.log("[WS] Azione trigger_camera ricevuta.");
+                    ws.isSpeaking = true;
+                    let replyText = await handleCameraTrigger(ws);
+                    
+                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                    ws.send(JSON.stringify({ action: 'speak', text: replyText }));
+
+                    try {
+                        const textChunks = splitTextIntoChunks(replyText, 150);
+                        for (let chunk of textChunks) {
+                            if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                            const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
+                            if (pcmPart && pcmPart.length > 0) {
+                                const chunkSize = 4096;
+                                for (let i = 0; i < pcmPart.length; i += chunkSize) {
+                                    if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                                    while (ws.bufferedAmount > 32768) {
+                                        await new Promise(resolve => setTimeout(resolve, 10));
+                                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                                    }
+                                    ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
+                                }
+                            }
+                        }
+                        if (ws.isSpeaking && ws.readyState === ws.OPEN) {
+                            ws.send(JSON.stringify({ action: 'stop' }));
+                        }
+                    } catch (streamErr) {
+                        console.error("[Errore Streaming Camera Audio]", streamErr);
+                    }
+                    ws.isSpeaking = false;
                     return;
                 }
 
