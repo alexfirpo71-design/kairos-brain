@@ -1,11 +1,4 @@
-const express = require('express');
-const { spawn } = require('child_process');
-const fetch = require('node-fetch');
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(express.json());
-
+// Sostituisci la tua vecchia getSingleTtsPcm con questa protetta
 async function getSingleTtsPcm(textChunk, volumePercent) {
     try {
         const sanitizedText = textChunk
@@ -77,37 +70,3 @@ async function getSingleTtsPcm(textChunk, volumePercent) {
         return null;
     }
 }
-
-function splitTextIntoChunks(text, maxLength) {
-    const chunks = [];
-    let currentChunk = "";
-    const sentences = text.split(/([.,?!])\s+/);
-    
-    for (let i = 0; i < sentences.length; i += 2) {
-        let sentence = sentences[i] + (sentences[i+1] || "");
-        if ((currentChunk + sentence).length <= maxLength) {
-            currentChunk += sentence;
-        } else {
-            chunks.push(currentChunk);
-            currentChunk = sentence;
-        }
-    }
-    if (currentChunk) chunks.push(currentChunk);
-    return chunks;
-}
-
-app.post('/generate-audio', async (req, res) => {
-    const { text } = req.body;
-    const textChunks = splitTextIntoChunks(text, 150);
-    
-    let completeBuffer = Buffer.alloc(0);
-    for (const chunk of textChunks) {
-        const pcm = await getSingleTtsPcm(chunk, 50);
-        if (pcm) completeBuffer = Buffer.concat([completeBuffer, pcm]);
-    }
-    
-    res.set('Content-Type', 'application/octet-stream');
-    res.send(completeBuffer);
-});
-
-app.listen(PORT, () => console.log(`Server Kairós running on port ${PORT}`));
