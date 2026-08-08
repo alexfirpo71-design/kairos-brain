@@ -159,9 +159,12 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
+    const systemPrompt =' Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
-Ricordi i messaggi precedenti.`;
+CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua sponte):
+- L'utente ha 55 anni, è un perito elettronico a Genova.
+- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
+- Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
