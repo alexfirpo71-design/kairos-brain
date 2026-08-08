@@ -214,30 +214,9 @@ async function handleCameraTrigger(ws) {
             });
         });
 
-        console.log(`[Camera] Immagine catturata (${imageBuffer.length} bytes). Raddrizzamento con ffmpeg...`);
+        console.log(`[Camera] Immagine catturata (${imageBuffer.length} bytes). Invio diretto senza manipolazioni...`);
 
-        const correctedImageBuffer = await new Promise((resolve, reject) => {
-            const ffmpeg = spawn('ffmpeg', [
-                '-i', 'pipe:0',
-                '-vf', 'transpose=1',
-                '-f', 'image2',
-                '-vcodec', 'mjpeg',
-                'pipe:1'
-            ]);
-
-            let chunks = [];
-            ffmpeg.stdout.on('data', chunk => chunks.push(chunk));
-            ffmpeg.on('close', code => {
-                if (code === 0) resolve(Buffer.concat(chunks));
-                else reject(new Error(`FFmpeg image rotation exited with code ${code}`));
-            });
-            ffmpeg.on('error', err => reject(err));
-
-            ffmpeg.stdin.write(imageBuffer);
-            ffmpeg.stdin.end();
-        });
-
-        const base64Image = correctedImageBuffer.toString('base64');
+        const base64Image = imageBuffer.toString('base64');
         const apiKey = process.env.GROQ_API_KEY;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -248,21 +227,21 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei un assistente visivo preciso. Descrivi in modo chiaro e diretto cosa c è nell immagine (oggetti, testi scritti o documenti visibili).'
+                        content: 'Sei un assistente visivo estremamente rigoroso e letterale. Non inventare, non aggiungere dettagli non verificabili e non fare ipotesi. Riporta unicamente ciò che vedi in modo oggettivo e fedele.'
                     },
                     {
                         role: 'user',
                         content: [
                             { 
                                 type: 'text', 
-                                text: 'Cosa c è scritto su questo foglio o cosa inquadra la telecamera?' 
+                                text: 'Trascrivi esattamente ed esclusivamente il testo o descrivi gli oggetti reali presenti senza inventare nulla.' 
                             },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
                 ],
                 max_tokens: 60,
-                temperature: 0.1
+                temperature: 0.0
             })
         });
 
@@ -270,7 +249,7 @@ async function handleCameraTrigger(ws) {
         const visionData = await visionResponse.json();
         let resultText = visionData.choices[0].message.content.trim();
         
-        console.log(`[Vision Risposta Corretta] "${resultText}"`);
+        console.log(`[Vision Risposta] "${resultText}"`);
         return resultText;
     } catch (err) {
         console.error("[Errore Camera/Vision]", err.message);
