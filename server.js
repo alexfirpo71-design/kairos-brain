@@ -216,14 +216,14 @@ async function handleCameraTrigger(ws) {
                         content: [
                             { 
                                 type: 'text', 
-                                text: 'Analizza questa foto con estrema precisione e descrivi unicamente ciò che vedi in modo oggettivo. Se non distingui bene i soggetti, l immagine è mossa o non capisci cosa c è, di semplicemente che non riesci a identificare chiaramente l immagine, senza inventare dettagli.' 
+                                text: 'Descrivi in modo freddo, meccanico e puramente descrittivo i colori e le forme geometriche che vedi in questa foto, senza menzionare hobby, computer, console o oggetti specifici se non sei assolutamente certo al 100% che siano visibili in modo nitido. Se l immagine è confusa, di semplicemente "Non riesco a distinguere i dettagli nell inquadratura".' 
                             },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
                 ],
-                max_tokens: 200,
-                temperature: 0.1
+                max_tokens: 100,
+                temperature: 0.0
             })
         });
 
