@@ -200,9 +200,14 @@ async function handleCameraTrigger(ws) {
         if (!camResponse.ok) throw new Error(`HTTP error! status: ${camResponse.status}`);
         
         const imageBuffer = await camResponse.buffer();
+        console.log("[Camera] Immagine catturata. Pesi bytes:", imageBuffer.length);
+
+        if (imageBuffer.length < 3000) {
+            console.log("[Camera] Immagine troppo piccola o vuota, rifiutata preventivamente.");
+            return "Immagine non leggibile o troppo scura.";
+        }
+
         const base64Image = imageBuffer.toString('base64');
-        
-        console.log("[Camera] Immagine catturata (dimensione bytes:", imageBuffer.length, "), invio a Groq Vision isolato...");
         const apiKey = process.env.GROQ_API_KEY;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -210,20 +215,20 @@ async function handleCameraTrigger(ws) {
             messages: [
                 {
                     role: 'system',
-                    content: 'Sei una telecamera di sicurezza cieca e distaccata. Descrivi solo ed esclusivamente gli oggetti fisici geometrici macroscopici presenti nella stanza (es. muro bianco, sedia nera, tavolo in legno). Ti è severamente vietato fare ipotesi, inventare nomi di persone, nomi di animali, riferimenti a hobby o passioni. Se l immagine non mostra chiaramente un oggetto comune in primo piano, rispondi solo: "Inquadratura non definita."'
+                    content: 'REGOLE TASSATIVE: Tu non sei un narratore e non devi fare supposizioni. Guarda unicamente il centro geometrico dell immagine. Se vedi solo rumore visivo, buio, sfocatura o forme non identificabili con assoluta certezza matematica, devi rispondere ESATTAMENTE con queste parole: "Ambiente non visibile." Non aggiungere altro.'
                 },
                 {
                     role: 'user',
                     content: [
                         { 
                             type: 'text', 
-                            text: 'Cosa c è esattamente in questa foto? Sii estremamente sintetico e fattuale.' 
+                            text: 'C è un oggetto nitido e perfettamente riconoscibile al centro? Se c è il minimo dubbio rispondi solo: Ambiente non visibile.' 
                         },
                         { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                     ]
                 }
             ],
-            max_tokens: 40,
+            max_tokens: 20,
             temperature: 0.0
         });
 
@@ -231,11 +236,18 @@ async function handleCameraTrigger(ws) {
         const visionData = await visionResponse.json();
         let resultText = visionData.choices[0].message.content.trim();
         
-        console.log(`[Vision Risposta Pulita] "${resultText}"`);
+        console.log(`[Vision Risposta Sicura] "${resultText}"`);
+
+        if (resultText.length > 50 || resultText.toLowerCase().includes('gatto') || resultText.toLowerCase().includes('cane') || resultText.toLowerCase().includes('stanza')) {
+            if (!resultText.includes('Ambiente non visibile')) {
+                return "Ambiente non visibile chiaramente.";
+            }
+        }
+
         return resultText;
     } catch (err) {
         console.error("[Errore Camera/Vision]", err.message);
-        return "Non sono riuscito a stabilire il collegamento con la telecamera o ad analizzare l'immagine.";
+        return "Non sono riuscito a stabilire il collegamento con la telecamera.";
     }
 }
 
