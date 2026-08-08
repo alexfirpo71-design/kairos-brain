@@ -200,14 +200,30 @@ async function handleCameraTrigger(ws) {
         if (!camResponse.ok) throw new Error(`HTTP error! status: ${camResponse.status}`);
         
         const imageBuffer = await camResponse.buffer();
-        console.log("[Camera] Immagine catturata. Pesi bytes:", imageBuffer.length);
+        console.log("[Camera] Immagine catturata. Raddrizzamento orientamento con ffmpeg...");
 
-        if (imageBuffer.length < 3000) {
-            console.log("[Camera] Immagine troppo piccola o vuota, rifiutata preventivamente.");
-            return "Immagine non leggibile o troppo scura.";
-        }
+        const correctedImageBuffer = await new Promise((resolve, reject) => {
+            const ffmpeg = spawn('ffmpeg', [
+                '-i', 'pipe:0',
+                '-vf', 'transpose=1',
+                '-f', 'image2',
+                '-vcodec', 'mjpeg',
+                'pipe:1'
+            ]);
 
-        const base64Image = imageBuffer.toString('base64');
+            let chunks = [];
+            ffmpeg.stdout.on('data', chunk => chunks.push(chunk));
+            ffmpeg.on('close', code => {
+                if (code === 0) resolve(Buffer.concat(chunks));
+                else reject(new Error(`FFmpeg image rotation exited with code ${code}`));
+            });
+            ffmpeg.on('error', err => reject(err));
+
+            ffmpeg.stdin.write(imageBuffer);
+            ffmpeg.stdin.end();
+        });
+
+        const base64Image = correctedImageBuffer.toString('base64');
         const apiKey = process.env.GROQ_API_KEY;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -215,39 +231,32 @@ async function handleCameraTrigger(ws) {
             messages: [
                 {
                     role: 'system',
-                    content: 'REGOLE TASSATIVE: Tu non sei un narratore e non devi fare supposizioni. Guarda unicamente il centro geometrico dell immagine. Se vedi solo rumore visivo, buio, sfocatura o forme non identificabili con assoluta certezza matematica, devi rispondere ESATTAMENTE con queste parole: "Ambiente non visibile." Non aggiungere altro.'
+                    content: 'Sei un assistente visivo preciso. Descrivi in modo chiaro e diretto cosa c è nell immagine (oggetti, testi scritti o documenti visibili).'
                 },
                 {
                     role: 'user',
                     content: [
                         { 
                             type: 'text', 
-                            text: 'C è un oggetto nitido e perfettamente riconoscibile al centro? Se c è il minimo dubbio rispondi solo: Ambiente non visibile.' 
+                            text: 'Cosa c è scritto su questo foglio o cosa inquadra la telecamera?' 
                         },
                         { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                     ]
                 }
             ],
-            max_tokens: 20,
-            temperature: 0.0
+            max_tokens: 60,
+            temperature: 0.1
         });
 
         if (!visionResponse.ok) throw new Error(`Errore Vision API: ${visionResponse.status}`);
         const visionData = await visionResponse.json();
         let resultText = visionData.choices[0].message.content.trim();
         
-        console.log(`[Vision Risposta Sicura] "${resultText}"`);
-
-        if (resultText.length > 50 || resultText.toLowerCase().includes('gatto') || resultText.toLowerCase().includes('cane') || resultText.toLowerCase().includes('stanza')) {
-            if (!resultText.includes('Ambiente non visibile')) {
-                return "Ambiente non visibile chiaramente.";
-            }
-        }
-
+        console.log(`[Vision Risposta Corretta] "${resultText}"`);
         return resultText;
     } catch (err) {
         console.error("[Errore Camera/Vision]", err.message);
-        return "Non sono riuscito a stabilire il collegamento con la telecamera.";
+        return "Non sono riuscito a elaborare l'immagine della telecamera.";
     }
 }
 
