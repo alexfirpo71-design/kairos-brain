@@ -1,4 +1,4 @@
-import { createServer } from 'http';
+import http, { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
@@ -194,13 +194,27 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
 
 async function handleCameraTrigger(ws) {
     const cameraUrl = "http://192.168.1.152:8080/shot.jpg";
-    console.log("[Camera] Contattando la telecamera IP...");
+    console.log("[Camera] Contattando la telecamera IP con modulo http nativo...");
+    
     try {
-        const camResponse = await fetch(cameraUrl, { timeout: 5000 });
-        if (!camResponse.ok) throw new Error(`HTTP error! status: ${camResponse.status}`);
-        
-        const imageBuffer = await camResponse.buffer();
-        console.log("[Camera] Immagine catturata. Raddrizzamento orientamento con ffmpeg...");
+        const imageBuffer = await new Promise((resolve, reject) => {
+            const req = http.get(cameraUrl, (res) => {
+                if (res.statusCode !== 200) {
+                    reject(new Error(`HTTP error! status: ${res.statusCode}`));
+                    return;
+                }
+                let chunks = [];
+                res.on('data', chunk => chunks.push(chunk));
+                res.on('end', () => resolve(Buffer.concat(chunks)));
+            });
+            req.on('error', err => reject(err));
+            req.setTimeout(5000, () => {
+                req.destroy();
+                reject(new Error("Timeout di connessione alla telecamera"));
+            });
+        });
+
+        console.log(`[Camera] Immagine catturata (${imageBuffer.length} bytes). Raddrizzamento con ffmpeg...`);
 
         const correctedImageBuffer = await new Promise((resolve, reject) => {
             const ffmpeg = spawn('ffmpeg', [
@@ -227,25 +241,29 @@ async function handleCameraTrigger(ws) {
         const apiKey = process.env.GROQ_API_KEY;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            model: 'llama-3.2-11b-vision-preview',
-            messages: [
-                {
-                    role: 'system',
-                    content: 'Sei un assistente visivo preciso. Descrivi in modo chiaro e diretto cosa c è nell immagine (oggetti, testi scritti o documenti visibili).'
-                },
-                {
-                    role: 'user',
-                    content: [
-                        { 
-                            type: 'text', 
-                            text: 'Cosa c è scritto su questo foglio o cosa inquadra la telecamera?' 
-                        },
-                        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-                    ]
-                }
-            ],
-            max_tokens: 60,
-            temperature: 0.1
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'llama-3.2-11b-vision-preview',
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'Sei un assistente visivo preciso. Descrivi in modo chiaro e diretto cosa c è nell immagine (oggetti, testi scritti o documenti visibili).'
+                    },
+                    {
+                        role: 'user',
+                        content: [
+                            { 
+                                type: 'text', 
+                                text: 'Cosa c è scritto su questo foglio o cosa inquadra la telecamera?' 
+                            },
+                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+                        ]
+                    }
+                ],
+                max_tokens: 60,
+                temperature: 0.1
+            })
         });
 
         if (!visionResponse.ok) throw new Error(`Errore Vision API: ${visionResponse.status}`);
@@ -256,7 +274,7 @@ async function handleCameraTrigger(ws) {
         return resultText;
     } catch (err) {
         console.error("[Errore Camera/Vision]", err.message);
-        return "Non sono riuscito a elaborare l'immagine della telecamera.";
+        return "Non sono riuscito ad accedere alla telecamera.";
     }
 }
 
