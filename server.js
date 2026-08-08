@@ -202,7 +202,7 @@ async function handleCameraTrigger(ws) {
         const imageBuffer = await camResponse.buffer();
         const base64Image = imageBuffer.toString('base64');
         
-        console.log("[Camera] Immagine catturata, invio a Groq Vision...");
+        console.log("[Camera] Immagine catturata (dimensione bytes:", imageBuffer.length, "), invio a Groq Vision...");
         const apiKey = process.env.GROQ_API_KEY;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -216,20 +216,23 @@ async function handleCameraTrigger(ws) {
                         content: [
                             { 
                                 type: 'text', 
-                                text: 'Descrivi in modo freddo, meccanico e puramente descrittivo i colori e le forme geometriche che vedi in questa foto, senza menzionare hobby, computer, console o oggetti specifici se non sei assolutamente certo al 100% che siano visibili in modo nitido. Se l immagine è confusa, di semplicemente "Non riesco a distinguere i dettagli nell inquadratura".' 
+                                text: 'Rispondi a questa domanda con estrema severità: vedi chiaramente qualcosa di nitido e definito in questa foto? Se c è il benché minimo dubbio, ombra, buio o confusione, devi rispondere unicamente ed esattamente con queste parole: "Immagine non interpretabile." Non aggiungere altro, non fare ipotesi.' 
                             },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
                 ],
-                max_tokens: 100,
+                max_tokens: 50,
                 temperature: 0.0
             })
         });
 
         if (!visionResponse.ok) throw new Error(`Errore Vision API: ${visionResponse.status}`);
         const visionData = await visionResponse.json();
-        return visionData.choices[0].message.content;
+        const resultText = visionData.choices[0].message.content.trim();
+        
+        console.log(`[Vision Risposta] "${resultText}"`);
+        return resultText;
     } catch (err) {
         console.error("[Errore Camera/Vision]", err.message);
         return "Non sono riuscito a stabilire il collegamento con la telecamera o ad analizzare l'immagine.";
