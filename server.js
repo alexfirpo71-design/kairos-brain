@@ -159,9 +159,9 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
+    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
-Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettronico a Genova, figlia Margot, fidanzata Tiziana, gatti Lulù, coniglio Isalide, cane Miele, la povera Prugna detta Prugnetta mancata l'11 maggio 2026, passioni per retrogaming, pilota drone con patentino, flight simulation e cucina).`;
+Ricordi i messaggi precedenti.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -245,7 +245,7 @@ wss.on('connection', (ws, req) => {
                         if (transcript && transcript.trim().length > 0) {
                             const rawText = transcript.toLowerCase().replace(/[.,\/$%\^&\*;:{}=\-_`~()?]/g, "").trim();
 
-                            if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
+                            if (rawText.includes('stop') || rawText.includes('stopp') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
                                 ws.isSpeaking = false;
                                 ws.send(JSON.stringify({ action: 'stop' }));
                                 console.log("[Comando] Interruzione eseguita.");
