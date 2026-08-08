@@ -214,12 +214,16 @@ async function handleCameraTrigger(ws) {
                     {
                         role: 'user',
                         content: [
-                            { type: 'text', text: 'Analizza questa immagine e descrivi cosa vedi in modo sintetico e diretto in italiano.' },
+                            { 
+                                type: 'text', 
+                                text: 'Analizza questa foto con estrema precisione e descrivi unicamente ciò che vedi in modo oggettivo. Se non distingui bene i soggetti, l immagine è mossa o non capisci cosa c è, di semplicemente che non riesci a identificare chiaramente l immagine, senza inventare dettagli.' 
+                            },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
                 ],
-                max_tokens: 200
+                max_tokens: 200,
+                temperature: 0.1
             })
         });
 
