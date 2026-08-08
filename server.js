@@ -48,7 +48,11 @@ function splitTextIntoChunks(text, maxLength = 250) {
 
 async function getSingleTtsPcm(textChunk, volumePercent) {
     try {
-        const sanitizedText = textChunk
+        // Corregge la pronuncia di Kairós per Google TTS evitando che dica "Kers"
+        const speechFriendlyText = textChunk
+            .replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
+
+        const sanitizedText = speechFriendlyText
             .replace(/[^\w\sàèéìòùÀÈÉÌÒÙ.,?!]/g, '')
             .trim();
 
@@ -159,7 +163,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt =' Kairós, l'assistente IA avanzato di ${userName}. 
+    const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua sponte):
 - L'utente ha 55 anni, è un perito elettronico a Genova.
