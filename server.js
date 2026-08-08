@@ -85,10 +85,10 @@ async function getSingleTtsPcm(textChunk, volumePercent) {
             ffmpeg.stdin.end();
         });
 
-        const silenceSamples = 8000; 
+        const silenceSamples = 4000; 
         let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
 
-        const fadeSamplesIn = Math.min(240, paddedPcmBuffer.length / 2);
+        const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
         for (let i = 0; i < fadeSamplesIn; i++) {
             const sample = paddedPcmBuffer.readInt16LE(i * 2);
             const multiplier = i / fadeSamplesIn;
@@ -122,7 +122,7 @@ async function transcribeAudio(audioBuffer) {
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,         
+        16, 0, 0, 0,          
         1, 0,                 
         1, 0,                 
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
@@ -271,28 +271,28 @@ wss.on('connection', (ws, req) => {
                     }
 
                     ws.isSpeaking = true;
-                    ws.send(JSON.stringify({ action: 'speak', state: 'idle', text: replyText }));
+                    ws.send(JSON.stringify({ action: 'speak', text: replyText }));
 
                     try {
-                        const textChunks = splitTextIntoChunks(replyText, 600);
+                        const textChunks = splitTextIntoChunks(replyText, 300);
                         
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             
                             if (pcmPart && pcmPart.length > 0) {
-                                // OTTIMIZZAZIONE: Chunk ingrandito a 4096 per alleggerire la pressione sull'ESP32
-                                const chunkSize = 4096;
+                                // Dimensione del chunk ridotta a 2048 e pausa calibrata per evitare il soffocamento del buffer ESP32
+                                const chunkSize = 2048;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
-                                    if (ws.bufferedAmount > 32768) {
-                                        await new Promise(resolve => setTimeout(resolve, 50));
+                                    if (ws.bufferedAmount > 16384) {
+                                        await new Promise(resolve => setTimeout(resolve, 30));
                                     }
                                     
-                                    ws.send(pcmPart.subarray(i, i + chunkSize));
+                                    ws.send(pcmPart.subarray(i, i + chunkSize), { binary: true });
+                                    await new Promise(resolve => setTimeout(resolve, 5)); // Ritardo di sicurezza inter-pacchetto
                                 }
-                                await new Promise(resolve => setTimeout(resolve, 20));
                             }
                         }
 
