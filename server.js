@@ -153,7 +153,7 @@ async function transcribeAudio(audioBuffer) {
     const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, ...formData.getHeaders() },
-        body: formData
+        body: wavBuffer
     });
 
     if (!response.ok) throw new Error(`Errore Whisper: ${response.status}`);
@@ -259,7 +259,14 @@ wss.on('connection', (ws, req) => {
                                 return;
                             }
 
-                            if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('più alto') || rawText.includes('volume su')) {
+                            const numberMatch = rawText.match(/\d+/);
+
+                            if (numberMatch && (rawText.includes('volume') || rawText.includes('metti') || rawText.includes('porta') || rawText.includes('al') || rawText.includes('a'))) {
+                                let targetVolume = parseInt(numberMatch[0], 10);
+                                currentVolume = Math.max(10, Math.min(100, targetVolume));
+                                replyText = `Volume impostato al ${currentVolume} per cento.`;
+                            }
+                            else if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('più alto') || rawText.includes('volume su')) {
                                 currentVolume = Math.min(100, currentVolume + 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
                             } 
