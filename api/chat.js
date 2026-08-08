@@ -1,63 +1,54 @@
 import { GoogleGenAI } from '@google/genai';
-import { Buffer } from 'buffer';
-
-export const config = {
-    api: {
-        bodyParser: false,
-    },
-};
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export default async function handler(req, res) {
+    // Gestione CORS opzionale o controllo metodo
     if (req.method !== 'POST') {
-        return res.status(200).json({ status: "Kairós API Online" });
+        return res.status(200).json({ status: "Kairós Chat API Online" });
     }
 
     try {
-        const chunks = [];
-        for await (const chunk of req) {
-            chunks.push(chunk);
-        }
-        const audioBuffer = Buffer.concat(chunks);
+        const { message, history = [] } = req.body;
 
-        if (audioBuffer.length === 0) {
-            return res.status(400).json({ error: 'Audio buffer is empty' });
+        if (!message || message.trim() === "") {
+            return res.status(400).json({ error: 'Il messaggio non può essere vuoto' });
         }
 
-        console.log("Audio ricevuto dall'ESP32, invio a Gemini...");
+        console.log(`[Kairós Chat] Messaggio ricevuto: "${message}"`);
 
-        // Genera la risposta testuale con Gemini istruendo il modello sul nome corretto
-        const response = await ai.models.generateContent({
+        // Prompt di sistema coerente con l'identità di Kairós e il profilo utente
+        const systemInstruction = `Sei Kairós, l'assistente IA avanzato di Alessandro. 
+Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
+Ricordi i messaggi precedenti e il profilo dell'utente (perito elettronico, appassionato di retrogaming, flight simulation e cucina tecnica).`;
+
+        // Configurazione della sessione di chat con la cronologia e l'istruzione di sistema
+        const chat = ai.chats.create({
             model: 'gemini-2.5-flash',
-            contents: [
-                {
-                    role: 'user',
-                    parts: [
-                        {
-                            inlineData: {
-                                data: audioBuffer.toString('base64'),
-                                mimeType: 'audio/pcm',
-                            },
-                        },
-                        {
-                            text: 'Ascolta questo messaggio audio e rispondi in modo sintetico e diretto. Ricorda che il tuo nome si scrive Kairós.',
-                        },
-                    ],
-                },
-            ],
+            config: {
+                systemInstruction: systemInstruction,
+                temperature: 0.7,
+                maxOutputTokens: 300,
+            },
+            history: history.map(h => ({
+                role: h.role, // 'user' o 'model'
+                parts: [{ text: h.content }]
+            }))
         });
 
-        const replyText = response.text || "Ricevuto.";
-        console.log(`[Kairós AI] Risposta generata: "${replyText}"`);
+        // Invio del messaggio al modello
+        const result = await chat.sendMessage({ message });
+        const replyText = result.text || "Ricevuto.";
 
-        // Per adesso, restituiamo il testo elaborato o un pacchetto di conferma pulito per l'ESP32
-        // Nota: se l'ESP32 si aspetta PCM grezzo, qui dovremmo mappare il TTS, 
-        // ma intanto restituiamo un JSON o un buffer vuoto sicuro finché non colleghi il TTS desiderato.
-        return res.status(200).json({ reply: replyText });
+        console.log(`[Kairós Chat] Risposta generata: "${replyText}"`);
+
+        return res.status(200).json({ 
+            status: "success",
+            reply: replyText 
+        });
 
     } catch (error) {
-        console.error("Errore server:", error.message);
+        console.error("Errore nell'endpoint chat:", error.message);
         return res.status(500).json({ error: error.message });
     }
 }
