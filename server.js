@@ -65,7 +65,7 @@ async function getSingleTtsPcm(textChunk, volumePercent) {
         const pcmBuffer = await new Promise((resolve, reject) => {
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
-                '-af', `volume=${volumeFactor},atempo=1.15,equalizer=f=300:width_type=o:width=2:g=3,equalizer=f=3000:width_type=o:width=2:g=-2,acompressor=threshold=-18dB:ratio=3:attack=5:release=50`,
+                '-af', `volume=${volumeFactor},equalizer=f=300:width_type=o:width=2:g=2,acompressor=threshold=-20dB:ratio=2:attack=5:release=50`,
                 '-f', 's16le',
                 '-acodec', 'pcm_s16le',
                 '-ac', '1',
@@ -122,13 +122,13 @@ async function transcribeAudio(audioBuffer) {
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,          
-        1, 0,                 
-        1, 0,                 
+        16, 0, 0, 0,        
+        1, 0,               
+        1, 0,               
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,                 
-        16, 0,                
+        2, 0,               
+        16, 0,              
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -154,7 +154,7 @@ async function getGroqChatResponse(conversationHistory, userName = "Alessandro")
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Sei Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
-Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatti Lulù, coniglio Isalide, cane Miele, la povera Prugna detta Prugnetta mancata il 11 maggio 2026, passioni per retrogaming, flight simulation e cucina tecnica).`;
+Ricordi i messaggi precedenti e il profilo dell'utente (55 anni, perito elettronico, sales representative a Genova, figlia Margot, fidanzata Tiziana, gatti Lulù, coniglio Isalide, cane Miele, la povera Prugna detta Prugnetta mancata l'11 maggio 2026, passioni per retrogaming, flight simulation e cucina tecnica).`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -281,17 +281,16 @@ wss.on('connection', (ws, req) => {
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             
                             if (pcmPart && pcmPart.length > 0) {
-                                // Dimensione del chunk ridotta a 2048 e pausa calibrata per evitare il soffocamento del buffer ESP32
-                                const chunkSize = 2048;
+                                const chunkSize = 4096;
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
-                                    if (ws.bufferedAmount > 16384) {
-                                        await new Promise(resolve => setTimeout(resolve, 30));
+                                    while (ws.bufferedAmount > 32768) {
+                                        await new Promise(resolve => setTimeout(resolve, 10));
+                                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     }
                                     
-                                    ws.send(pcmPart.subarray(i, i + chunkSize), { binary: true });
-                                    await new Promise(resolve => setTimeout(resolve, 5)); // Ritardo di sicurezza inter-pacchetto
+                                    ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                                 }
                             }
                         }
