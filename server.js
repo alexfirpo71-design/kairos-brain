@@ -206,32 +206,37 @@ async function handleCameraTrigger(ws) {
         const apiKey = process.env.GROQ_API_KEY;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'llama-3.2-11b-vision-preview',
-                messages: [
-                    {
-                        role: 'user',
-                        content: [
-                            { 
-                                type: 'text', 
-                                text: 'Rispondi a questa domanda con estrema severità: vedi chiaramente qualcosa di nitido e definito in questa foto? Se c è il benché minimo dubbio, ombra, buio o confusione, devi rispondere unicamente ed esattamente con queste parole: "Immagine non interpretabile." Non aggiungere altro, non fare ipotesi.' 
-                            },
-                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-                        ]
-                    }
-                ],
-                max_tokens: 50,
-                temperature: 0.0
-            })
+            model: 'llama-3.2-11b-vision-preview',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'Sei un sensore ottico binario. Non devi interpretare la scena, non devi usare la creatività, non devi indovinare. Se l immagine non è un quadro chiaro e definito, rispondi unicamente con la stringa esatta: ERRORE_OFFLINE.'
+                },
+                {
+                    role: 'user',
+                    content: [
+                        { 
+                            type: 'text', 
+                            text: 'Cosa cè in questa foto? Se hai il minimo dubbio rispondi solo ERRORE_OFFLINE.' 
+                        },
+                        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+                    ]
+                }
+            ],
+            max_tokens: 30,
+            temperature: 0.0
         });
 
         if (!visionResponse.ok) throw new Error(`Errore Vision API: ${visionResponse.status}`);
         const visionData = await visionResponse.json();
-        const resultText = visionData.choices[0].message.content.trim();
+        let resultText = visionData.choices[0].message.content.trim();
         
         console.log(`[Vision Risposta] "${resultText}"`);
+
+        if (resultText.includes('ERRORE_OFFLINE') || resultText.length < 5) {
+            return "Segnale video non interpretabile o inquadratura non definita.";
+        }
+
         return resultText;
     } catch (err) {
         console.error("[Errore Camera/Vision]", err.message);
