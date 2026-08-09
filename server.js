@@ -286,7 +286,7 @@ async function handleCameraTrigger(ws) {
                         content: 'Ho attivato la telecamera.'
                     }
                 ],
-                max_tokens: 1000,
+                max_tokens: 150,
                 temperature: 0.0
             })
         });
