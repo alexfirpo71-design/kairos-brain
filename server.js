@@ -17,45 +17,56 @@ const server = createServer(async (req, res) => {
                     return;
                 }
 
-                console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, elaborazione in corso...");
+                console.log("[Server] Immagine ricevuta dall'ESP32, invio a Groq Vision in corso...");
                 const apiKey = process.env.GROQ_API_KEY;
                 
+                // Convertiamo l'immagine in base64 per l'API Vision
+                const base64Image = imageBuffer.toString('base64');
+                const imageUrl = `data:image/jpeg;base64,${base64Image}`;
+
                 const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'llama-3.1-8b-instant',
+                        model: 'llama-3.2-11b-vision-preview',
                         messages: [
                             {
-                                role: 'system',
-                                content: 'Sei Kairós. Restituisci solo una conferma tecnica brevissima e senza fronzoli.'
-                            },
-                            {
                                 role: 'user',
-                                content: 'Conferma ricezione scatto.'
+                                content: [
+                                    {
+                                        type: 'text',
+                                        text: "Guarda questa foto scattata dalla telecamera di casa. Leggi cosa c'è scritto sul biglietto o descrivi brevemente cosa vedi in modo sintetico e diretto."
+                                    },
+                                    {
+                                        type: 'image_url',
+                                        image_url: {
+                                            url: imageUrl
+                                        }
+                                    }
+                                ]
                             }
                         ],
-                        max_tokens: 40,
+                        max_tokens: 150,
                         temperature: 0.0
                     })
                 });
 
                 if (!visionResponse.ok) {
                     const errorBody = await visionResponse.text();
-                    console.error(`[Errore Dettagliato Groq] Status: ${visionResponse.status} - Body: ${errorBody}`);
+                    console.error(`[Errore Dettagliato Groq Vision] Status: ${visionResponse.status} - Body: ${errorBody}`);
                     throw new Error(`Errore API: ${visionResponse.status}`);
                 }
                 const visionData = await visionResponse.json();
                 let resultText = visionData.choices[0].message.content.trim();
                 
-                console.log(`[Risposta Server] "${resultText}"`);
+                console.log(`[Risposta Vision] "${resultText}"`);
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
                 res.end(resultText);
 
             } catch (err) {
-                console.error("[Errore Upload]", err.message);
+                console.error("[Errore Upload Vision]", err.message);
                 res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Errore interno del server durante l elaborazione dell immagine.');
+                res.end('Errore interno del server durante l analisi visiva.');
             }
         });
     } else {
@@ -270,34 +281,38 @@ async function handleCameraTrigger(ws) {
         });
 
         const apiKey = process.env.GROQ_API_KEY;
+        const base64Image = imageBuffer.toString('base64');
+        const imageUrl = `data:image/jpeg;base64,${base64Image}`;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'llama-3.1-8b-instant',
+                model: 'llama-3.2-11b-vision-preview',
                 messages: [
                     {
-                        role: 'system',
-                        content: 'Sei un assistente tecnico.'
-                    },
-                    {
                         role: 'user',
-                        content: 'Ho attivato la telecamera.'
+                        content: [
+                            { type: 'text', text: "Leggi il testo o descrivi cosa c'è in questa foto in modo sintetico." },
+                            { type: 'image_url', image_url: { url: imageUrl } }
+                        ]
                     }
                 ],
-                max_tokens: 50,
+                max_tokens: 100,
                 temperature: 0.0
             })
         });
 
         if (!visionResponse.ok) throw new Error(`Errore API: ${visionResponse.status}`);
         
-        console.log(`[Camera Risposta] Scatto e comunicazione riusciti.`);
-        return `Ho contattato la telecamera con successo.`;
+        const visionData = await visionResponse.json();
+        const description = visionData.choices[0].message.content.trim();
+        
+        console.log(`[Camera Risposta Vision] "${description}"`);
+        return description;
     } catch (err) {
         console.error("[Errore Camera]", err.message);
-        return "Non sono riuscito ad accedere alla telecamera.";
+        return "Non sono riuscito ad accedere alla telecamera o ad analizzare l'immagine.";
     }
 }
 
@@ -375,8 +390,8 @@ wss.on('connection', (ws, req) => {
                                 currentVolume = Math.max(10, currentVolume - 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
                             } 
-                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('vedi') || rawText.includes('inquadra')) {
-                                console.log("[WS] Intenzione telecamera rilevata da comando vocale.");
+                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('vedi') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
+                                console.log("[WS] Intenzione telecamera/analisi rilevata da comando vocale.");
                                 replyText = await handleCameraTrigger(ws);
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             }
