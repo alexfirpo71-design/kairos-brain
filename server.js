@@ -48,6 +48,8 @@ const server = createServer(async (req, res) => {
                 });
 
                 if (!visionResponse.ok) {
+                    const errorBody = await visionResponse.text();
+                    console.error(`[Errore Dettagliato Groq] Status: ${visionResponse.status} - Body: ${errorBody}`);
                     throw new Error(`Errore Vision API: ${visionResponse.status}`);
                 }
                 const visionData = await visionResponse.json();
