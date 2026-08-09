@@ -138,7 +138,7 @@ async function transcribeAudio(audioBuffer) {
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
         2, 0,              
-        16, 0,              
+        16, 0,             
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -166,7 +166,7 @@ async function getGroqChatResponse(conversationHistory, userName = "Alessandro")
 Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua sponte):
 - L'utente ha 55 anni, è un perito elettronico a Genova.
-- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
+- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
 - Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
@@ -194,7 +194,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
 
 async function handleCameraTrigger(ws) {
     const cameraUrl = "http://192.168.1.152:8080/shot.jpg";
-    console.log("[Camera] Contattando la telecamera IP con modulo http nativo...");
+    console.log("[Camera] Contattando la telecamera IP...");
     
     try {
         const imageBuffer = await new Promise((resolve, reject) => {
@@ -214,8 +214,6 @@ async function handleCameraTrigger(ws) {
             });
         });
 
-        console.log(`[Camera] Immagine catturata (${imageBuffer.length} bytes). Invio diretto senza manipolazioni...`);
-
         const base64Image = imageBuffer.toString('base64');
         const apiKey = process.env.GROQ_API_KEY;
         
@@ -227,20 +225,20 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei un assistente visivo estremamente rigoroso e letterale. Non inventare, non aggiungere dettagli non verificabili e non fare ipotesi. Riporta unicamente ciò che vedi in modo oggettivo e fedele.'
+                        content: 'Sei un sistema OCR e un lettore ottico inflessibile. Il tuo unico compito è leggere ed estrarre qualsiasi testo visibile nell immagine (cartelli, fogli, biglietti, scritte). Non descrivere lo sfondo, non inventare oggetti, non fare ipotesi. Riporta unicamente le parole scritte nel testo con estrema precisione.'
                     },
                     {
                         role: 'user',
                         content: [
                             { 
                                 type: 'text', 
-                                text: 'Trascrivi esattamente ed esclusivamente il testo o descrivi gli oggetti reali presenti senza inventare nulla.' 
+                                text: 'Leggi e trascrivi parola per parola tutto il testo scritto sul biglietto o foglio inquadrato. Se non ci sono scritte leggibili, di \'Nessun testo trovato\'.' 
                             },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
                 ],
-                max_tokens: 60,
+                max_tokens: 50,
                 temperature: 0.0
             })
         });
@@ -250,7 +248,7 @@ async function handleCameraTrigger(ws) {
         let resultText = visionData.choices[0].message.content.trim();
         
         console.log(`[Vision Risposta] "${resultText}"`);
-        return resultText;
+        return `Sul biglietto c'è scritto: ${resultText}`;
     } catch (err) {
         console.error("[Errore Camera/Vision]", err.message);
         return "Non sono riuscito ad accedere alla telecamera.";
@@ -287,41 +285,6 @@ wss.on('connection', (ws, req) => {
                     console.log("[WS] Comando di stop ricevuto dall'ESP32.");
                     ws.isSpeaking = false;
                     audioBuffer = [];
-                    return;
-                }
-
-                if (data.action === 'trigger_camera') {
-                    console.log("[WS] Azione trigger_camera ricevuta.");
-                    ws.isSpeaking = true;
-                    let replyText = await handleCameraTrigger(ws);
-                    
-                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
-                    ws.send(JSON.stringify({ action: 'speak', text: replyText }));
-
-                    try {
-                        const textChunks = splitTextIntoChunks(replyText, 150);
-                        for (let chunk of textChunks) {
-                            if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                            const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
-                            if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 4096;
-                                for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                    if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                                    while (ws.bufferedAmount > 32768) {
-                                        await new Promise(resolve => setTimeout(resolve, 10));
-                                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                                    }
-                                    ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
-                                }
-                            }
-                        }
-                        if (ws.isSpeaking && ws.readyState === ws.OPEN) {
-                            ws.send(JSON.stringify({ action: 'stop' }));
-                        }
-                    } catch (streamErr) {
-                        console.error("[Errore Streaming Camera Audio]", streamErr);
-                    }
-                    ws.isSpeaking = false;
                     return;
                 }
 
@@ -366,6 +329,11 @@ wss.on('connection', (ws, req) => {
                                 currentVolume = Math.max(10, currentVolume - 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
                             } 
+                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('vedi') || rawText.includes('inquadra')) {
+                                console.log("[WS] Intenzione telecamera rilevata da comando vocale.");
+                                replyText = await handleCameraTrigger(ws);
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                            }
                             else {
                                 ws.conversationHistory.push({ role: 'user', content: transcript });
                                 replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
