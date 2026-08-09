@@ -192,26 +192,27 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
     return data.choices[0].message.content;
 }
 
+// FUNZIONE BRIDGE: Chiede all'ESP32 di scattare e inviare la foto
 async function handleCameraTrigger(ws) {
-    const cameraUrl = "http://192.168.1.152:8080/shot.jpg";
-    console.log("[Camera] Contattando la telecamera IP...");
+    console.log("[Camera] Richiesta cattura immagine all'ESP32 tramite WebSocket...");
     
     try {
         const imageBuffer = await new Promise((resolve, reject) => {
-            const req = http.get(cameraUrl, (res) => {
-                if (res.statusCode !== 200) {
-                    reject(new Error(`HTTP error! status: ${res.statusCode}`));
-                    return;
+            ws.pendingVisionRequest = true;
+            ws.visionResolve = resolve;
+            ws.visionReject = reject;
+            ws.imageBuffer = [];
+
+            // Invia il comando di cattura all'ESP32
+            ws.send(JSON.stringify({ action: 'capture_image' }));
+
+            // Timeout di sicurezza dopo 10 secondi
+            setTimeout(() => {
+                if (ws.pendingVisionRequest) {
+                    ws.pendingVisionRequest = false;
+                    reject(new Error("Timeout: l'ESP32 non ha inviato l'immagine in tempo."));
                 }
-                let chunks = [];
-                res.on('data', chunk => chunks.push(chunk));
-                res.on('end', () => resolve(Buffer.concat(chunks)));
-            });
-            req.on('error', err => reject(err));
-            req.setTimeout(5000, () => {
-                req.destroy();
-                reject(new Error("Timeout di connessione alla telecamera"));
-            });
+            }, 10000);
         });
 
         const base64Image = imageBuffer.toString('base64');
@@ -251,7 +252,7 @@ async function handleCameraTrigger(ws) {
         return `Sul biglietto c'è scritto: ${resultText}`;
     } catch (err) {
         console.error("[Errore Camera/Vision]", err.message);
-        return "Non sono riuscito ad accedere alla telecamera.";
+        return "Non sono riuscito ad accedere alla telecamera tramite l'ESP32.";
     }
 }
 
@@ -261,6 +262,12 @@ wss.on('connection', (ws, req) => {
     ws.conversationHistory = [];
     ws.isSpeaking = false;
     let audioBuffer = [];
+
+    // Variabili per la gestione della telecamera via ESP32
+    ws.pendingVisionRequest = false;
+    ws.visionResolve = null;
+    ws.visionReject = null;
+    ws.imageBuffer = [];
 
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
@@ -276,7 +283,16 @@ wss.on('connection', (ws, req) => {
 
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
-            audioBuffer.push(message);
+            // Se stiamo aspettando l'immagine dall'ESP32
+            if (ws.pendingVisionRequest) {
+                ws.imageBuffer.push(message);
+                const completeImageBuffer = Buffer.concat(ws.imageBuffer);
+                ws.imageBuffer = [];
+                ws.pendingVisionRequest = false;
+                if (ws.visionResolve) ws.visionResolve(completeImageBuffer);
+            } else {
+                audioBuffer.push(message);
+            }
         } else {
             try {
                 const data = JSON.parse(message.toString());
