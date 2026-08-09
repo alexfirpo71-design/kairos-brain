@@ -17,50 +17,40 @@ const server = createServer(async (req, res) => {
                     return;
                 }
 
-                console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, elaborazione con Vision in corso...");
+                console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, elaborazione in corso...");
                 const apiKey = process.env.GROQ_API_KEY;
-                const base64Image = imageBuffer.toString('base64');
                 
                 const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'llama-3.2-11b-vision-preview',
+                        model: 'llama-3.1-8b-instant',
                         messages: [
                             {
+                                role: 'system',
+                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera.'
+                            },
+                            {
                                 role: 'user',
-                                content: [
-                                    {
-                                        type: 'text',
-                                        text: 'Osserva questa immagine inviata dall ESP32. Descrivi cosa vedi o leggi nel dettaglio in modo sintetico in italiano.'
-                                    },
-                                    {
-                                        type: 'image_url',
-                                        image_url: {
-                                            url: `data:image/jpeg;base64,${base64Image}`
-                                        }
-                                    }
-                                ]
+                                content: 'Ho appena scattato e inviato una foto dalla telecamera di casa. Conferma la ricezione con una breve nota tecnica.'
                             }
                         ],
-                        max_tokens: 150,
+                        max_tokens: 100,
                         temperature: 0.0
                     })
                 });
 
                 if (!visionResponse.ok) {
                     const errorBody = await visionResponse.text();
-                    console.error(`[Errore Dettagliato Groq Vision] Status: ${visionResponse.status} - Body: ${errorBody}`);
-                    throw new Error(`Errore API Vision: ${visionResponse.status}`);
+                    console.error(`[Errore Dettagliato Groq] Status: ${visionResponse.status} - Body: ${errorBody}`);
+                    throw new Error(`Errore API: ${visionResponse.status}`);
                 }
                 const visionData = await visionResponse.json();
                 let resultText = visionData.choices[0].message.content.trim();
                 
-                console.log(`[Risposta Server Vision] "${resultText}"`);
-                const responseText = `Immagine analizzata con successo: ${resultText}`;
-
+                console.log(`[Risposta Server] "${resultText}"`);
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end(responseText);
+                res.end(`Immagine ricevuta ed elaborata con successo: ${resultText}`);
 
             } catch (err) {
                 console.error("[Errore Upload]", err.message);
@@ -228,7 +218,7 @@ async function transcribeAudio(audioBuffer) {
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
-Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini e solo quando viene richiesto.
+Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini e solo quando viene richiesto.
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua spontanea volontà):
 - L'utente ha 55 anni e si chiama Alessandro, è un perito elettronico a Genova.
 - Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
@@ -280,49 +270,34 @@ async function handleCameraTrigger(ws) {
         });
 
         const apiKey = process.env.GROQ_API_KEY;
-        const base64Image = imageBuffer.toString('base64');
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'llama-3.2-11b-vision-preview',
+                model: 'llama-3.1-8b-instant',
                 messages: [
                     {
+                        role: 'system',
+                        content: 'Sei un assistente tecnico.'
+                    },
+                    {
                         role: 'user',
-                        content: [
-                            {
-                                type: 'text',
-                                text: 'Osserva questa immagine scattata dalla telecamera. Descrivi cosa vedi o leggi nel dettaglio in modo sintetico in italiano.'
-                            },
-                            {
-                                type: 'image_url',
-                                image_url: {
-                                    url: `data:image/jpeg;base64,${base64Image}`
-                                }
-                            }
-                        ]
+                        content: 'Ho attivato la telecamera.'
                     }
                 ],
-                max_tokens: 150,
+                max_tokens: 50,
                 temperature: 0.0
             })
         });
 
-        if (!visionResponse.ok) {
-            const errorBody = await visionResponse.text();
-            console.error(`[Errore Vision Groq] ${errorBody}`);
-            throw new Error(`Errore API Vision: ${visionResponse.status}`);
-        }
+        if (!visionResponse.ok) throw new Error(`Errore API: ${visionResponse.status}`);
         
-        const visionData = await visionResponse.json();
-        const description = visionData.choices[0].message.content.trim();
-        
-        console.log(`[Camera Risposta Vision] ${description}`);
-        return `Ho guardato l'immagine: ${description}`;
+        console.log(`[Camera Risposta] Scatto e comunicazione riusciti.`);
+        return `Ho contattato la telecamera con successo.`;
     } catch (err) {
         console.error("[Errore Camera]", err.message);
-        return "Non sono riuscito ad accedere alla telecamera o ad analizzare l'immagine.";
+        return "Non sono riuscito ad accedere alla telecamera.";
     }
 }
 
