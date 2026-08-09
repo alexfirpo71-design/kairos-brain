@@ -28,12 +28,12 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera.'
+                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, fornendo una descrizione chiara, concisa e naturale, pronta per essere letta da una sintesi vocale.'
                             },
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi esattamente tutto il testo o descrivi cosa c e in questa foto in modo chiaro e conciso.' },
+                                    { type: 'text', text: 'Trascrivi esattamente tutto il testo o descrivi cosa c e in questa foto in modo chiaro e conciso in italiano.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
@@ -191,12 +191,12 @@ async function transcribeAudio(audioBuffer) {
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
         16, 0, 0, 0,         
-        1, 0,              
-        1, 0,              
+        1, 0,               
+        1, 0,               
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,              
-        16, 0,             
+        2, 0,               
+        16, 0,              
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -283,12 +283,12 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei Kairós, un assistente vocale. Fornisci una descrizione sintetica e diretta di ciò che vedi o leggi nella foto, pronta per essere letta a voce.'
+                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione sintetica e diretta di ciò che vedi o leggi nella foto, pronta per essere letta a voce.'
                     },
                     {
                         role: 'user',
                         content: [
-                            { type: 'text', text: 'Leggi il testo principale o descrivi brevemente cosa c e in questa foto.' },
+                            { type: 'text', text: 'Leggi il testo principale o descrivi brevemente cosa c e in questa foto in italiano.' },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
