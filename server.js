@@ -35,7 +35,7 @@ const server = createServer(async (req, res) => {
                                 content: 'Ho appena scattato e inviato una foto dalla telecamera di casa. Conferma la ricezione con una breve nota tecnica.'
                             }
                         ],
-                        max_tokens: 100,
+                        max_tokens: 150,
                         temperature: 0.0
                     })
                 });
