@@ -177,7 +177,7 @@ CONTESTO PRIVATO di cui non parlare in continuazione se non richiesto (da usare 
         body: JSON.stringify({
             model: 'llama-3.1-8b-instant',
             messages: messages,
-            max_tokens: 3000,
+            max_tokens: 999,
             temperature: 0.7
         })
     });
