@@ -254,6 +254,69 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
     return data.choices[0].message.content;
 }
 
+async function handleCameraTrigger(ws) {
+    const cameraUrl = "http://192.168.1.152:8080/shot.jpg";
+    console.log("[Camera] Contattando la telecamera IP...");
+    
+    try {
+        const imageBuffer = await new Promise((resolve, reject) => {
+            const req = http.get(cameraUrl, (res) => {
+                if (res.statusCode !== 200) {
+                    reject(new Error(`HTTP error! status: ${res.statusCode}`));
+                    return;
+                }
+                let chunks = [];
+                res.on('data', chunk => chunks.push(chunk));
+                res.on('end', () => resolve(Buffer.concat(chunks)));
+            });
+            req.on('error', err => reject(err));
+            req.setTimeout(5000, () => {
+                req.destroy();
+                reject(new Error("Timeout di connessione alla telecamera"));
+            });
+        });
+
+        const base64Image = imageBuffer.toString('base64');
+        const apiKey = process.env.GROQ_API_KEY;
+        
+        const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'llama-3.2-11b-vision-preview',
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'Sei un sistema OCR e un lettore ottico inflessibile. Il tuo unico compito è leggere ed estrarre qualsiasi testo visibile nell immagine (cartelli, fogli, biglietti, scritte). Non descrivere lo sfondo, non inventare oggetti, non fare ipotesi. Riporta unicamente le parole scritte nel testo con estrema precisione.'
+                    },
+                    {
+                        role: 'user',
+                        content: [
+                            { 
+                                type: 'text', 
+                                text: 'Leggi e trascrivi parola per parola tutto il testo scritto sul biglietto o foglio inquadrato. Se non ci sono scritte leggibili, di \'Nessun testo trovato\'.' 
+                            },
+                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+                        ]
+                    }
+                ],
+                max_tokens: 50,
+                temperature: 0.0
+            })
+        });
+
+        if (!visionResponse.ok) throw new Error(`Errore Vision API: ${visionResponse.status}`);
+        const visionData = await visionResponse.json();
+        let resultText = visionData.choices[0].message.content.trim();
+        
+        console.log(`[Vision Risposta] "${resultText}"`);
+        return `Sul biglietto c'è scritto: ${resultText}`;
+    } catch (err) {
+        console.error("[Errore Camera/Vision]", err.message);
+        return "Non sono riuscito ad accedere alla telecamera.";
+    }
+}
+
 wss.on('connection', (ws, req) => {
     console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.userName = "Alessandro";
@@ -328,6 +391,11 @@ wss.on('connection', (ws, req) => {
                                 currentVolume = Math.max(10, currentVolume - 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
                             } 
+                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('vedi') || rawText.includes('inquadra')) {
+                                console.log("[WS] Intenzione telecamera rilevata da comando vocale.");
+                                replyText = await handleCameraTrigger(ws);
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                            }
                             else {
                                 ws.conversationHistory.push({ role: 'user', content: transcript });
                                 replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
