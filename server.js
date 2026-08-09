@@ -33,7 +33,7 @@ const server = createServer(async (req, res) => {
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi esattamente tutto il testo o descrivi cosa c e in questa foto.' },
+                                    { type: 'text', text: 'Trascrivi esattamente tutto il testo o descrivi cosa c e in questa foto in modo chiaro e conciso.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
@@ -252,7 +252,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
 
 async function handleCameraTrigger(ws) {
     const cameraUrl = "http://192.168.1.152:8080/shot.jpg";
-    console.log("[Camera] Contattando la telecamera IP...");
+    console.log("[Camera] Contattando la telecamera IP su comando vocale...");
     
     try {
         const imageBuffer = await new Promise((resolve, reject) => {
@@ -283,17 +283,17 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei Kairós, un assistente tecnico visivo.'
+                        content: 'Sei Kairós, un assistente vocale. Fornisci una descrizione sintetica e diretta di ciò che vedi o leggi nella foto, pronta per essere letta a voce.'
                     },
                     {
                         role: 'user',
                         content: [
-                            { type: 'text', text: 'Trascrivi tutto il testo e descrivi cosa vedi in questa foto in modo chiaro e completo.' },
+                            { type: 'text', text: 'Leggi il testo principale o descrivi brevemente cosa c e in questa foto.' },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
                 ],
-                max_tokens: 1000,
+                max_tokens: 250,
                 temperature: 0.0
             })
         });
@@ -307,7 +307,7 @@ async function handleCameraTrigger(ws) {
         return description;
     } catch (err) {
         console.error("[Errore Camera]", err.message);
-        return "Non sono riuscito ad accedere alla telecamera o ad analizzare l'immagine.";
+        return "Non sono riuscito ad accedere alla telecamera.";
     }
 }
 
@@ -386,7 +386,7 @@ wss.on('connection', (ws, req) => {
                                 replyText = `Volume al ${currentVolume} per cento.`;
                             } 
                             else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('vedi') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
-                                console.log("[WS] Intenzione telecamera rilevata da comando vocale.");
+                                console.log("[WS] Intenzione telecamera rilevata da comando vocale. Scatto in corso...");
                                 replyText = await handleCameraTrigger(ws);
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             }
