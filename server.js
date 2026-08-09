@@ -28,12 +28,12 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, fornendo una descrizione chiara, concisa e naturale, pronta per essere letta da una sintesi vocale.'
+                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, descrivendo sia il testo scritto sul foglietto sia ciò che si trova sotto o intorno ad esso, in modo chiaro e naturale.'
                             },
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi esattamente tutto il testo o descrivi cosa c e in questa foto in modo chiaro e conciso in italiano.' },
+                                    { type: 'text', text: 'Trascrivi il testo scritto sul foglietto e descrivi dettagliatamente cosa c e sotto o intorno al foglietto in italiano.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
@@ -51,7 +51,7 @@ const server = createServer(async (req, res) => {
                 const visionData = await visionResponse.json();
                 let resultText = visionData.choices[0].message.content.trim();
                 
-                console.log(`[Risposta Server] "${resultText}"`);
+                console.log(`[Risposta Monitor] "${resultText}"`);
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
                 res.end(`Immagine ricevuta ed elaborata con successo: ${resultText}`);
 
@@ -283,12 +283,12 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione sintetica e diretta di ciò che vedi o leggi nella foto, pronta per essere letta a voce.'
+                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione dettagliata sia del testo scritto sul foglietto sia di ciò che si trova sotto o intorno ad esso, pronta per essere letta a voce.'
                     },
                     {
                         role: 'user',
                         content: [
-                            { type: 'text', text: 'Leggi il testo principale o descrivi brevemente cosa c e in questa foto in italiano.' },
+                            { type: 'text', text: 'Trascrivi il testo scritto sul foglietto e descrivi cosa c e sotto o intorno al foglietto in italiano.' },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
@@ -303,7 +303,7 @@ async function handleCameraTrigger(ws) {
         const visionData = await visionResponse.json();
         const description = visionData.choices[0].message.content.trim();
         
-        console.log(`[Camera Risposta Vision] "${description}"`);
+        console.log(`[Camera Risposta Monitor] "${description}"`);
         return description;
     } catch (err) {
         console.error("[Errore Camera]", err.message);
@@ -422,8 +422,8 @@ wss.on('connection', (ws, req) => {
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
-                                    while (ws.bufferedAmount > 32768) {
-                                        await new Promise(resolve => setTimeout(resolve, 10));
+                                    while (ws.bufferedAmount > 65536) {
+                                        await new Promise(resolve => setTimeout(resolve, 20));
                                         if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     }
                                     
