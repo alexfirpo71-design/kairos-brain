@@ -24,7 +24,7 @@ const server = createServer(async (req, res) => {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'qwen/qwen3.6-27b',
+                        model: 'llama-3.2-90b-vision-preview',
                         messages: [
                             {
                                 role: 'system',
@@ -236,7 +236,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
             model: 'llama-3.1-8b-instant',
             messages: messages,
             max_tokens: 300,
-            temperature: 0.7
+            temperature: 0.3
         })
     });
 
@@ -279,7 +279,7 @@ async function handleCameraTrigger(ws) {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'qwen/qwen3.6-27b',
+                model: 'llama-3.2-90b-vision-preview',
                 messages: [
                     {
                         role: 'system',
@@ -288,12 +288,12 @@ async function handleCameraTrigger(ws) {
                     {
                         role: 'user',
                         content: [
-                            { type: 'text', text: 'Leggi il testo principale o descrivi brevemente cosa c e in questa foto.' },
+                            { type: 'text', text: 'Leggi tutto il testo presente nella foto o descrivi in modo chiaro e dettagliato cosa contiene.' },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
                 ],
-                max_tokens: 250,
+                max_tokens: 300,
                 temperature: 0.0
             })
         });
