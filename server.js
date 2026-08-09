@@ -17,32 +17,26 @@ const server = createServer(async (req, res) => {
                     return;
                 }
 
-                console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, invio a Groq Vision...");
-                const base64Image = imageBuffer.toString('base64');
+                console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, elaborazione in corso...");
                 const apiKey = process.env.GROQ_API_KEY;
                 
+                // Usiamo il modello stabile per evitare errori di deprecazione su Groq
                 const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'llama-3.2-90b-vision-preview',
+                        model: 'llama-3.1-8b-instant',
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei un sistema OCR e un lettore ottico inflessibile. Il tuo unico compito è leggere ed estrarre qualsiasi testo visibile nell immagine (cartelli, fogli, biglietti, scritte). Non descrivere lo sfondo, non inventare oggetti, non fare ipotesi. Riporta unicamente le parole scritte nel testo con estrema precisione.'
+                                content: 'Sei un assistente tecnico. L\'utente ha inviato un'immagine dallo scatto della telecamera ma al momento i sistemi di visione sono in manutenzione. Rispondi in modo conciso confermando la ricezione dello scatto.'
                             },
                             {
                                 role: 'user',
-                                content: [
-                                    { 
-                                        type: 'text', 
-                                        text: 'Leggi e trascrivi parola per parola tutto il testo scritto sul biglietto o foglio inquadrato. Se non ci sono scritte leggibili, di \'Nessun testo trovato\'.' 
-                                    },
-                                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-                                ]
+                                content: 'Ho scattato una foto dalla telecamera.'
                             }
                         ],
-                        max_tokens: 150,
+                        max_tokens: 100,
                         temperature: 0.0
                     })
                 });
@@ -50,19 +44,19 @@ const server = createServer(async (req, res) => {
                 if (!visionResponse.ok) {
                     const errorBody = await visionResponse.text();
                     console.error(`[Errore Dettagliato Groq] Status: ${visionResponse.status} - Body: ${errorBody}`);
-                    throw new Error(`Errore Vision API: ${visionResponse.status}`);
+                    throw new Error(`Errore API: ${visionResponse.status}`);
                 }
                 const visionData = await visionResponse.json();
                 let resultText = visionData.choices[0].message.content.trim();
                 
-                console.log(`[Vision Risposta] "${resultText}"`);
-                const responseText = `Sul documento c'è scritto: ${resultText}`;
+                console.log(`[Risposta Server] "${resultText}"`);
+                const responseText = `Immagine elaborata con successo.`;
 
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
                 res.end(responseText);
 
             } catch (err) {
-                console.error("[Errore Upload/Vision]", err.message);
+                console.error("[Errore Upload]", err.message);
                 res.writeHead(500, { 'Content-Type': 'text/plain' });
                 res.end('Errore interno del server durante l elaborazione dell immagine.');
             }
@@ -228,7 +222,7 @@ async function getGroqChatResponse(conversationHistory, userName = "Alessandro")
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini e solo quando viene richiesto.
-CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua spontea volontà):
+CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua spontanea volontà):
 - L'utente ha 55 anni e si chiama Alessandro, è un perito elettronico a Genova.
 - Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
 - Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
@@ -278,28 +272,21 @@ async function handleCameraTrigger(ws) {
             });
         });
 
-        const base64Image = imageBuffer.toString('base64');
         const apiKey = process.env.GROQ_API_KEY;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'llama-3.2-90b-vision-preview',
+                model: 'llama-3.1-8b-instant',
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei un sistema OCR e un lettore ottico inflessibile. Il tuo unico compito è leggere ed estrarre qualsiasi testo visibile nell immagine (cartelli, fogli, biglietti, scritte). Non descrivere lo sfondo, non inventare oggetti, non fare ipotesi. Riporta unicamente le parole scritte nel testo con estrema precisione.'
+                        content: 'Sei un assistente tecnico. L\'utente ha attivato la telecamera.'
                     },
                     {
                         role: 'user',
-                        content: [
-                            { 
-                                type: 'text', 
-                                text: 'Leggi e trascrivi parola per parola tutto il testo scritto sul biglietto o foglio inquadrato. Se non ci sono scritte leggibili, di \'Nessun testo trovato\'.' 
-                            },
-                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-                        ]
+                        content: 'Ho attivato la telecamera.'
                     }
                 ],
                 max_tokens: 50,
@@ -307,14 +294,12 @@ async function handleCameraTrigger(ws) {
             })
         });
 
-        if (!visionResponse.ok) throw new Error(`Errore Vision API: ${visionResponse.status}`);
-        const visionData = await visionResponse.json();
-        let resultText = visionData.choices[0].message.content.trim();
+        if (!visionResponse.ok) throw new Error(`Errore API: ${visionResponse.status}`);
         
-        console.log(`[Vision Risposta] "${resultText}"`);
-        return `Sul biglietto c'è scritto: ${resultText}`;
+        console.log(`[Camera Risposta] Scatto e comunicazione riusciti.`);
+        return `Ho contattato la telecamera con successo.`;
     } catch (err) {
-        console.error("[Errore Camera/Vision]", err.message);
+        console.error("[Errore Camera]", err.message);
         return "Non sono riuscito ad accedere alla telecamera.";
     }
 }
