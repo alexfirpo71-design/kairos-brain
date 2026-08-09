@@ -18,7 +18,6 @@ const server = createServer(async (req, res) => {
                 }
 
                 console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, elaborazione in corso...");
-                const base64Image = imageBuffer.toString('base64');
                 const apiKey = process.env.GROQ_API_KEY;
                 
                 const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -29,20 +28,14 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei un assistente di analisi visiva e testuale. Analizza la richiesta e dai una risposta coerente ed esauriente sull\'immagine ricevuta.'
+                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera.'
                             },
                             {
                                 role: 'user',
-                                content: [
-                                    { 
-                                        type: 'text', 
-                                        text: 'L\'utente ha inviato uno scatto dalla telecamera. Conferma la ricezione dell\'immagine e fornisci un riscontro operativo.' 
-                                    },
-                                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-                                ]
+                                content: 'Ho appena scattato e inviato una foto dalla telecamera di casa. Conferma la ricezione con una breve nota tecnica.'
                             }
                         ],
-                        max_tokens: 150,
+                        max_tokens: 100,
                         temperature: 0.0
                     })
                 });
@@ -55,14 +48,12 @@ const server = createServer(async (req, res) => {
                 const visionData = await visionResponse.json();
                 let resultText = visionData.choices[0].message.content.trim();
                 
-                console.log(`[Vision Risposta] "${resultText}"`);
-                const responseText = `Immagine elaborata: ${resultText}`;
-
+                console.log(`[Risposta Server] "${resultText}"`);
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end(responseText);
+                res.end(`Immagine ricevuta ed elaborata con successo: ${resultText}`);
 
             } catch (err) {
-                console.error("[Errore Upload/Vision]", err.message);
+                console.error("[Errore Upload]", err.message);
                 res.writeHead(500, { 'Content-Type': 'text/plain' });
                 res.end('Errore interno del server durante l elaborazione dell immagine.');
             }
@@ -278,7 +269,6 @@ async function handleCameraTrigger(ws) {
             });
         });
 
-        const base64Image = imageBuffer.toString('base64');
         const apiKey = process.env.GROQ_API_KEY;
         
         const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -289,14 +279,11 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei un assistente di analisi visiva.'
+                        content: 'Sei un assistente tecnico.'
                     },
                     {
                         role: 'user',
-                        content: [
-                            { type: 'text', text: 'Analizza lo scatto.' },
-                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-                        ]
+                        content: 'Ho attivato la telecamera.'
                     }
                 ],
                 max_tokens: 50,
@@ -307,7 +294,7 @@ async function handleCameraTrigger(ws) {
         if (!visionResponse.ok) throw new Error(`Errore API: ${visionResponse.status}`);
         
         console.log(`[Camera Risposta] Scatto e comunicazione riusciti.`);
-        return `Ho contattato la telecamera e acquisito l'immagine con successo.`;
+        return `Ho contattato la telecamera con successo.`;
     } catch (err) {
         console.error("[Errore Camera]", err.message);
         return "Non sono riuscito ad accedere alla telecamera.";
