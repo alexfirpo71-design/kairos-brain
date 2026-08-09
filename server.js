@@ -25,7 +25,7 @@ const server = createServer(async (req, res) => {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'llama-3.2-11b-vision-preview',
+                        model: 'llama-3.2-11b-vision-instruct',
                         messages: [
                             {
                                 role: 'system',
@@ -285,7 +285,7 @@ async function handleCameraTrigger(ws) {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'llama-3.2-11b-vision-preview',
+                model: 'llama-3.2-11b-vision-instruct',
                 messages: [
                     {
                         role: 'system',
