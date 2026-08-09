@@ -194,7 +194,7 @@ async function transcribeAudio(audioBuffer) {
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,        
+        16, 0, 0, 0,         
         1, 0,              
         1, 0,              
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
