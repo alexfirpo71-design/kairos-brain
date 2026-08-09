@@ -162,12 +162,16 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
-Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
-CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua sponte):
-- L'utente ha 55 anni, è un perito elettronico a Genova.
-- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
-- Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
+    const systemPrompt = `Kairós, l'assistente IA di Alessandro Firpo.
+Sei un'IA avanzata e amichevole, il tuo tono è colloquiale e diretto.
+TUTTO IL TUO MONDO È QUI:
+- Alessandro: 55 anni, perito elettronico a Genova.
+- Famiglia: la figlia Margot (talentuosa nel disegno), la compagna Tiziana (separata con due figli), papà Lino.
+- Memoria: la mamma Elviana (passata a miglior vita il 24/12/2024), la gatta Prugna (venuta a mancare nel maggio 2026, sepolta in giardino).
+- Affetti domestici: Miele (cane), Lulù e Isalide (gatti/coniglio).
+- Interessi: restauro retrogaming, simulazione volo (Airbus A320neo), droni, fotografia analogica, spazio/astronomia.
+- Progetti: Kairós (sistema di memoria), cabina al campeggio di Carasco.
+- Rispondi sempre tenendo conto di questo contesto se interpellato, sii cordiale e tratta la sua famiglia con rispetto.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -192,9 +196,8 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
     return data.choices[0].message.content;
 }
 
-// FUNZIONE BRIDGE: Chiede all'ESP32 di scattare e inviare la foto
 async function handleCameraTrigger(ws) {
-    console.log("[Camera] Richiesta cattura immagine all'ESP32 tramite WebSocket...");
+    console.log("[Camera] Richiesta cattura immagine all'ESP32...");
     
     try {
         const imageBuffer = await new Promise((resolve, reject) => {
@@ -203,14 +206,12 @@ async function handleCameraTrigger(ws) {
             ws.visionReject = reject;
             ws.imageBuffer = [];
 
-            // Invia il comando di cattura all'ESP32
             ws.send(JSON.stringify({ action: 'capture_image' }));
 
-            // Timeout di sicurezza dopo 10 secondi
             setTimeout(() => {
                 if (ws.pendingVisionRequest) {
                     ws.pendingVisionRequest = false;
-                    reject(new Error("Timeout: l'ESP32 non ha inviato l'immagine in tempo."));
+                    reject(new Error("Timeout: l'ESP32 non ha inviato l'immagine."));
                 }
             }, 10000);
         });
@@ -226,15 +227,12 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei un sistema OCR e un lettore ottico inflessibile. Il tuo unico compito è leggere ed estrarre qualsiasi testo visibile nell immagine (cartelli, fogli, biglietti, scritte). Non descrivere lo sfondo, non inventare oggetti, non fare ipotesi. Riporta unicamente le parole scritte nel testo con estrema precisione.'
+                        content: 'Sei il sistema Vision di Kairós. Trascrivi il testo leggibile.'
                     },
                     {
                         role: 'user',
                         content: [
-                            { 
-                                type: 'text', 
-                                text: 'Leggi e trascrivi parola per parola tutto il testo scritto sul biglietto o foglio inquadrato. Se non ci sono scritte leggibili, di \'Nessun testo trovato\'.' 
-                            },
+                            { type: 'text', text: 'Leggi il testo visibile.' },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
@@ -246,44 +244,22 @@ async function handleCameraTrigger(ws) {
 
         if (!visionResponse.ok) throw new Error(`Errore Vision API: ${visionResponse.status}`);
         const visionData = await visionResponse.json();
-        let resultText = visionData.choices[0].message.content.trim();
-        
-        console.log(`[Vision Risposta] "${resultText}"`);
-        return `Sul biglietto c'è scritto: ${resultText}`;
+        return `Sul biglietto c'è scritto: ${visionData.choices[0].message.content.trim()}`;
     } catch (err) {
-        console.error("[Errore Camera/Vision]", err.message);
-        return "Non sono riuscito ad accedere alla telecamera tramite l'ESP32.";
+        console.error("[Errore Camera]", err.message);
+        return "Non sono riuscito ad accedere alla telecamera.";
     }
 }
 
 wss.on('connection', (ws, req) => {
-    console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.userName = "Alessandro";
     ws.conversationHistory = [];
     ws.isSpeaking = false;
     let audioBuffer = [];
-
-    // Variabili per la gestione della telecamera via ESP32
     ws.pendingVisionRequest = false;
-    ws.visionResolve = null;
-    ws.visionReject = null;
-    ws.imageBuffer = [];
-
-    ws.isAlive = true;
-    ws.on('pong', () => { ws.isAlive = true; });
-
-    const pingInterval = setInterval(() => {
-        if (ws.isAlive === false) {
-            clearInterval(pingInterval);
-            return ws.terminate();
-        }
-        ws.isAlive = false;
-        ws.ping();
-    }, 30000);
 
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
-            // Se stiamo aspettando l'immagine dall'ESP32
             if (ws.pendingVisionRequest) {
                 ws.imageBuffer.push(message);
                 const completeImageBuffer = Buffer.concat(ws.imageBuffer);
@@ -296,28 +272,12 @@ wss.on('connection', (ws, req) => {
         } else {
             try {
                 const data = JSON.parse(message.toString());
-                
                 if (data.action === 'stop') {
-                    console.log("[WS] Comando di stop ricevuto dall'ESP32.");
                     ws.isSpeaking = false;
                     audioBuffer = [];
                     return;
                 }
-
-                if (data.user) ws.userName = data.user;
-
-                if (data.mac) {
-                    ws.mac = data.mac;
-                    if (!sessionHistories.has(data.mac)) {
-                        sessionHistories.set(data.mac, []);
-                    }
-                    ws.conversationHistory = sessionHistories.get(data.mac);
-                }
-
-                if (data.mac || data.device || data.user || data.location || data.status) {
-                    return;
-                }
-
+                
                 if (data.state === 'processing') {
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
                     audioBuffer = [];
@@ -325,100 +285,35 @@ wss.on('connection', (ws, req) => {
                     let replyText = "Ricevuto.";
                     try {
                         const transcript = await transcribeAudio(completeAudioBuffer);
-                        console.log(`[Whisper] Trascritto: "${transcript}"`);
-                        
-                        if (transcript && transcript.trim().length > 0) {
-                            const rawText = transcript.toLowerCase().replace(/[.,\/$%\^&\*;:{}=\-_`~()?]/g, "").trim();
-
-                            if (rawText.includes('stop') || rawText.includes('stopp') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
-                                ws.isSpeaking = false;
-                                ws.send(JSON.stringify({ action: 'stop' }));
-                                console.log("[Comando] Interruzione eseguita.");
-                                return;
-                            }
-
-                            if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('più alto') || rawText.includes('volume su')) {
-                                currentVolume = Math.min(100, currentVolume + 15);
-                                replyText = `Volume al ${currentVolume} per cento.`;
-                            } 
-                            else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('più basso') || rawText.includes('volume giu') || rawText.includes('volume giù')) {
-                                currentVolume = Math.max(10, currentVolume - 15);
-                                replyText = `Volume al ${currentVolume} per cento.`;
-                            } 
-                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('vedi') || rawText.includes('inquadra')) {
-                                console.log("[WS] Intenzione telecamera rilevata da comando vocale.");
-                                replyText = await handleCameraTrigger(ws);
-                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
-                            }
-                            else {
-                                ws.conversationHistory.push({ role: 'user', content: transcript });
-                                replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
-
-                                if (ws.conversationHistory.length > 10) {
-                                    ws.conversationHistory = ws.conversationHistory.slice(-10);
-                                }
-                            }
-
-                            console.log(`[Elaborato] Risposta: "${replyText}" | Volume: ${currentVolume}%`);
+                        if (transcript) {
+                            ws.conversationHistory.push({ role: 'user', content: transcript });
+                            replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                            ws.conversationHistory.push({ role: 'assistant', content: replyText });
                         }
                     } catch (err) {
-                        console.error("[Errore IA]", err);
-                        replyText = "Si è verificato un errore di elaborazione.";
+                        replyText = "Errore di elaborazione.";
                     }
 
                     ws.isSpeaking = true;
                     ws.send(JSON.stringify({ action: 'speak', text: replyText }));
 
-                    try {
-                        const textChunks = splitTextIntoChunks(replyText, 150);
-                        
-                        for (let chunk of textChunks) {
-                            if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                            const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
-                            
-                            if (pcmPart && pcmPart.length > 0) {
-                                const chunkSize = 4096;
-                                for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                    if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                                    
-                                    while (ws.bufferedAmount > 32768) {
-                                        await new Promise(resolve => setTimeout(resolve, 10));
-                                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                                    }
-                                    
-                                    ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
-                                }
+                    const textChunks = splitTextIntoChunks(replyText, 150);
+                    for (let chunk of textChunks) {
+                        if (!ws.isSpeaking) break;
+                        const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
+                        if (pcmPart) {
+                            for (let i = 0; i < pcmPart.length; i += 4096) {
+                                if (!ws.isSpeaking) break;
+                                ws.send(pcmPart.subarray(i, i + 4096), { binary: true });
                             }
                         }
-
-                        if (ws.isSpeaking) {
-                            console.log("[WS] Streaming audio completato.");
-                            if (ws.readyState === ws.OPEN) {
-                                ws.send(JSON.stringify({ action: 'stop' }));
-                            }
-                        }
-                        ws.isSpeaking = false;
-
-                    } catch (streamErr) {
-                        console.error("[Errore Streaming Audio]", streamErr);
-                        ws.isSpeaking = false;
                     }
+                    ws.isSpeaking = false;
                 }
-            } catch (e) {
-                console.log('[WS Testo]', message.toString());
-            }
+            } catch (e) { console.log('Errore WebSocket:', e); }
         }
-    });
-
-    ws.on('close', () => {
-        clearInterval(pingInterval);
-        ws.isSpeaking = false;
-        console.log("[WS] Connessione chiusa.");
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Server Kairós in ascolto sulla porta ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server Kairós attivo su porta ${PORT}`));
