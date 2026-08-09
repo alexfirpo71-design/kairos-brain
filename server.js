@@ -162,7 +162,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Kairós, l'assistente IA avanzato di ${Alessandro}. 
+    const systemPrompt = `Kairós, l'assistente IA avanzato di ${Username}. 
 Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini e solo se richiesto.
 CONTESTO PRIVATO di cui non parlare in continuazione se non richiesto (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua spontea volontà):
 - L'utente ha 55 anni,si chiama Alessandro è un perito elettronico a Genova.
