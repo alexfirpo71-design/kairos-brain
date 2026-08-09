@@ -24,7 +24,7 @@ const server = createServer(async (req, res) => {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'llama-3.2-90b-vision-preview',
+                        model: 'qwen/qwen3.6-27b',
                         messages: [
                             {
                                 role: 'system',
@@ -190,13 +190,13 @@ async function transcribeAudio(audioBuffer) {
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,       
-        1, 0,             
-        1, 0,             
+        16, 0, 0, 0,         
+        1, 0,              
+        1, 0,              
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,             
-        16, 0,            
+        2, 0,              
+        16, 0,             
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -236,7 +236,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
             model: 'llama-3.1-8b-instant',
             messages: messages,
             max_tokens: 300,
-            temperature: 0.3
+            temperature: 0.7
         })
     });
 
@@ -266,7 +266,7 @@ async function handleCameraTrigger(ws) {
                 res.on('end', () => resolve(Buffer.concat(chunks)));
             });
             req.on('error', err => reject(err));
-            req.setTimeout(10000, () => {
+            req.setTimeout(5000, () => {
                 req.destroy();
                 reject(new Error("Timeout di connessione alla telecamera"));
             });
@@ -279,7 +279,7 @@ async function handleCameraTrigger(ws) {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'llama-3.2-90b-vision-preview',
+                model: 'qwen/qwen3.6-27b',
                 messages: [
                     {
                         role: 'system',
@@ -288,12 +288,12 @@ async function handleCameraTrigger(ws) {
                     {
                         role: 'user',
                         content: [
-                            { type: 'text', text: 'Leggi tutto il testo presente nella foto o descrivi in modo chiaro e dettagliato cosa contiene.' },
+                            { type: 'text', text: 'Leggi il testo principale o descrivi brevemente cosa c e in questa foto.' },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
                 ],
-                max_tokens: 300,
+                max_tokens: 250,
                 temperature: 0.0
             })
         });
