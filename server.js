@@ -28,14 +28,14 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera.'
+                                content: 'Sei Kairós. Restituisci solo una conferma tecnica brevissima e senza fronzoli.'
                             },
                             {
                                 role: 'user',
-                                content: 'Ho appena scattato e inviato una foto dalla telecamera di casa. Conferma la ricezione con una breve nota tecnica.'
+                                content: 'Conferma ricezione scatto.'
                             }
                         ],
-                        max_tokens: 150,
+                        max_tokens: 40,
                         temperature: 0.0
                     })
                 });
@@ -50,7 +50,7 @@ const server = createServer(async (req, res) => {
                 
                 console.log(`[Risposta Server] "${resultText}"`);
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end(`Immagine ricevuta ed elaborata con successo: ${resultText}`);
+                res.end(resultText);
 
             } catch (err) {
                 console.error("[Errore Upload]", err.message);
