@@ -267,7 +267,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
 }
 
 async function handleCameraTrigger(ws) {
-    const cameraUrl = "http://192.168.1.152:8080/shot.jpg";
+    const cameraUrl = "http://192.168.1.154:8080/shot.jpg";
     console.log("[Camera] Contattando la telecamera IP su comando vocale...");
     
     try {
