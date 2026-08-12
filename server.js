@@ -318,8 +318,9 @@ wss.on('connection', (ws, req) => {
     ws.isSpeaking = false;
     let audioBuffer = [];
 
+    // Finestra di dialogo estesa a 20 secondi per il botta e risposta continuo
     let sessionActiveUntil = 0;
-    const SESSION_DURATION_MS = 10000;
+    const SESSION_DURATION_MS = 20000;
 
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
@@ -383,6 +384,7 @@ wss.on('connection', (ws, req) => {
                                 return; 
                             }
 
+                            // Tieni aperta la sessione per altri 20 secondi da questo momento
                             sessionActiveUntil = now + SESSION_DURATION_MS;
 
                             if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
@@ -441,6 +443,9 @@ wss.on('connection', (ws, req) => {
                     ws.isSpeaking = true;
                     ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
 
+                    // Estendiamo ulteriormente la sessione anche dal momento in cui l'assistente risponde
+                    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
+
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 150);
                         
@@ -470,6 +475,9 @@ wss.on('connection', (ws, req) => {
                             }
                         }
                         ws.isSpeaking = false;
+                        
+                        // Rinnova la sessione anche alla fine del playback audio
+                        sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
