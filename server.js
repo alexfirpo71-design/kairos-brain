@@ -28,12 +28,12 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei Kairós. Analizza l immagine e rispondi INTERAMENTE IN LINGUA ITALIANA. Non usare mai l inglese, nemmeno nei ragionamenti interni o nei blocchi di pensiero.'
+                                content: 'ATTENZIONE: DEVI RISPONDERE IN MANIERA ASSOLUTA ED ESCLUSIVA IN LINGUA ITALIANA. Qualsiasi altra lingua è severamente vietata. Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Descrivi sia il testo scritto sul foglietto sia ciò che si trova sotto o intorno ad esso, in modo chiaro e naturale, parlando unicamente in italiano.'
                             },
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi tutto il testo che vedi sul foglietto e descrivi cosa c e sotto o intorno al foglietto esclusivamente in italiano.' },
+                                    { type: 'text', text: 'Trascrivi tutto il testo che vedi sul foglietto e descrivi cosa c e sotto o intorno al foglietto. RISPONDI ESCLUSIVAMENTE IN ITALIANO.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
@@ -52,6 +52,7 @@ const server = createServer(async (req, res) => {
                 const visionData = await visionResponse.json();
                 let rawText = visionData.choices[0].message.content.trim();
                 
+                // Rimuove eventuali blocchi di pensiero (<think>...</think>) generati dal modello
                 let resultText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
                 
                 console.log(`[Risposta Monitor] "${resultText}"`);
@@ -302,12 +303,12 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei Kairós. Analizza l immagine e rispondi INTERAMENTE IN LINGUA ITALIANA. Fornisci direttamente il testo trascritto e la descrizione finale, senza includere alcun blocco di pensiero, ragionamento o testo in inglese.'
+                        content: 'ATTENZIONE: DEVI RISPONDERE IN MANIERA ASSOLUTA ED ESCLUSIVA IN LINGUA ITALIANA. Qualsiasi altra lingua è severamente vietata. Sei Kairós, un assistente vocale. Fornisci una descrizione dettagliata sia del testo scritto sul foglietto sia di ciò che si trova sotto o intorno ad esso, pronta per essere letta a voce, parlando rigorosamente in italiano.'
                     },
                     {
                         role: 'user',
                         content: [
-                            { type: 'text', text: 'Trascrivi tutto il testo che vedi sul foglietto e descrivi cosa c e sotto o intorno al foglietto esclusivamente in italiano.' },
+                            { type: 'text', text: 'Trascrivi tutto il testo che vedi sul foglietto e descrivi cosa c e sotto o intorno al foglietto. RISPONDI ESCLUSIVAMENTE IN ITALIANO.' },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
@@ -322,6 +323,7 @@ async function handleCameraTrigger(ws) {
         const visionData = await visionResponse.json();
         let rawDescription = visionData.choices[0].message.content.trim();
         
+        // Rimuove eventuali blocchi di pensiero (<think>...</think>) generati dal modello
         let description = rawDescription.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
         
         console.log(`[Camera Risposta Monitor] "${description}"`);
