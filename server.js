@@ -28,18 +28,18 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, descrivendo sia il testo scritto sul foglietto sia ciò che si trova sotto o intorno ad esso, in modo chiaro e naturale. Non inserire MAI tag di pensiero, ragionamenti interni o passaggi in inglese.'
+                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, descrivendo sia il testo scritto sul foglietto sia ciò che si trova sotto o intorno ad esso, in modo chiaro e naturale. Non tradurre in inglese e non inserire tag di pensiero.'
                             },
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi il testo scritto sul foglietto e descrivi cosa c e sotto o intorno al foglietto in italiano.' },
+                                    { type: 'text', text: 'Trascrivi tutto il testo che vedi sul foglietto e descrivi cosa c e sotto o intorno al foglietto esclusivamente in italiano.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
                         ],
                         max_tokens: 300,
-                        temperature: 0.0
+                        temperature: 0.1
                     })
                 });
 
@@ -299,18 +299,18 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione dettagliata sia del testo scritto sul foglietto sia di ciò che si trova sotto o intorno ad esso, pronta per essere letta a voce. Non inserire MAI tag di pensiero, ragionamenti interni o passaggi in inglese.'
+                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione dettagliata sia del testo scritto sul foglietto sia di ciò che si trova sotto o intorno ad esso, pronta per essere letta a voce. Non tradurre in inglese e non inserire tag di pensiero.'
                     },
                     {
                         role: 'user',
                         content: [
-                            { type: 'text', text: 'Trascrivi il testo scritto sul foglietto e descrivi cosa c e sotto o intorno al foglietto in italiano.' },
+                            { type: 'text', text: 'Trascrivi tutto il testo che vedi sul foglietto e descrivi cosa c e sotto o intorno al foglietto esclusivamente in italiano.' },
                             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
                         ]
                     }
                 ],
                 max_tokens: 250,
-                temperature: 0.0
+                temperature: 0.1
             })
         });
 
