@@ -4,7 +4,6 @@ import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { spawn } from 'child_process';
 
-// Mappa globale per memorizzare la connessione WebSocket attiva associata al client/dispositivo
 let activeWsClient = null;
 
 const server = createServer(async (req, res) => {
@@ -31,17 +30,17 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, descrivendo sia il testo scritto sul foglietto sia ciò che si trova sotto o intorno ad esso, in modo chiaro e naturale, pronto per essere letto a voce. Non tradurre in inglese.'
+                                content: 'Sei Kairós, l assistente di Alessandro. Osserva l immagine e scrivi UNICA E ESCLUSIVAMENTE la frase di risposta finale in italiano, descrivendo il testo sul foglietto e ciò che c è intorno. NON inserire passaggi intermedi, elenchi numerati, analisi, tag di pensiero o markdown di alcun tipo. Fornisci solo il testo secco da leggere a voce.'
                             },
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi tutto il testo che vedi sul foglietto e descrivi cosa c e sotto o intorno al foglietto esclusivamente in italiano.' },
+                                    { type: 'text', text: 'Trascrivi il testo sul foglietto e descrivi cosa c è intorno. Rispondi solo con la frase finale.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
                         ],
-                        max_tokens: 300,
+                        max_tokens: 200,
                         temperature: 0.1
                     })
                 });
@@ -56,14 +55,27 @@ const server = createServer(async (req, res) => {
                 let rawText = visionData.choices[0].message.content.trim();
                 
                 let resultText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+                // Estrae solo la parte finale pulita se il modello include passaggi numerati o bozze
+                if (resultText.includes("4.")) {
+                    const parts = resultText.split(/4\.\s*\*\*.*?\*\*:/i);
+                    if (parts.length > 1) {
+                        resultText = parts[1].trim().replace(/^["']|["']$/g, '');
+                    }
+                }
+                // Fallamento di sicurezza alternativo se trova virgolette o sezioni di draft
+                if (resultText.includes("Draft the response")) {
+                    const match = resultText.match(/["']([^"']+)["']/g);
+                    if (match && match.length > 0) {
+                        resultText = match[match.length - 1].replace(/["']/g, '');
+                    }
+                }
                 
                 console.log(`[Risposta Monitor] "${resultText}"`);
                 
-                // Risponde subito alla richiesta HTTP dell'ESP32
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
                 res.end(`Immagine ricevuta ed elaborata con successo: ${resultText}`);
 
-                // Ora invia l'audio della descrizione direttamente via WebSocket se il client è connesso
                 if (activeWsClient && activeWsClient.readyState === activeWsClient.OPEN) {
                     console.log("[WS] Invio audio della descrizione dello scatto all'ESP32...");
                     activeWsClient.isSpeaking = true;
@@ -89,6 +101,8 @@ const server = createServer(async (req, res) => {
                                     activeWsClient.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                                 }
                             }
+                            // Pausa per evitare il blocco di Google TTS
+                            await new Promise(resolve => setTimeout(resolve, 300));
                         }
 
                         if (activeWsClient.isSpeaking) {
@@ -414,7 +428,6 @@ wss.on('connection', (ws, req) => {
                             else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
                                 console.log("[WS] Intenzione telecamera rilevata. Invio comando di scatto all'ESP32...");
                                 
-                                // Invia il comando di scatto hardware all'ESP32
                                 ws.send(JSON.stringify({ action: 'trigger_camera', text: 'Scatto la foto...' }));
 
                                 replyText = "Un attimo, guardo subito.";
@@ -473,6 +486,8 @@ wss.on('connection', (ws, req) => {
                                     ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                                 }
                             }
+                            // Pausa per evitare il blocco di Google TTS
+                            await new Promise(resolve => setTimeout(resolve, 300));
                         }
 
                         if (ws.isSpeaking) {
