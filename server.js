@@ -302,7 +302,7 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei Kairós. Analizza l immagine e rispondi INTERAMENTE IN LINGUA ITALIANA. Non usare mai l inglese, nemmeno nei ragionamenti interni o nei blocchi di pensiero.'
+                        content: 'Sei Kairós. Analizza l immagine e rispondi INTERAMENTE IN LINGUA ITALIANA. Fornisci direttamente il testo trascritto e la descrizione finale, senza includere alcun blocco di pensiero, ragionamento o testo in inglese.'
                     },
                     {
                         role: 'user',
