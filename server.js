@@ -1,8 +1,4 @@
-Certo. Ti lascio il **file Node.js completo**, già integrato con le modifiche: lettura OCR più completa e senza descrizioni inutili, riconoscimento di più comandi vocali per la fotocamera, mantenimento della lingua originale del testo fotografato e gestione più robusta degli errori.
 
-Una precisazione importante: **questo codice elimina il bisogno del tasto `C` solo se il firmware ESP32 è già programmato per attivare l'ascolto tramite wake word/comando vocale**. Nel server qui sotto non esiste alcuna dipendenza dal tasto `C`; se attualmente `C` avvia la registrazione, quella parte va modificata nel firmware ESP32.
-
-# Server Kairós — versione completa
 
 ```javascript
 import http, { createServer } from 'http';
