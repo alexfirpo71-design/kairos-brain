@@ -480,13 +480,29 @@ wss.on('connection', (ws, req) => {
 
                         if (ws.isSpeaking) {
                             console.log("[WS] Streaming audio completato.");
+                            
+                            const closingPhrase = " Prego e buona giornata.";
+                            const closingPcm = await getSingleTtsPcm(closingPhrase, currentVolume);
+                            
+                            if (closingPcm && closingPcm.length > 0) {
+                                const chunkSize = 4096;
+                                for (let i = 0; i < closingPcm.length; i += chunkSize) {
+                                    if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                                    
+                                    while (ws.bufferedAmount > 65536) {
+                                        await new Promise(resolve => setTimeout(resolve, 20));
+                                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                                    }
+                                    
+                                    ws.send(closingPcm.subarray(i, i + Math.min(chunkSize, closingPcm.length - i)), { binary: true });
+                                }
+                            }
+
                             if (ws.readyState === ws.OPEN) {
                                 ws.send(JSON.stringify({ action: 'stop' }));
                             }
                         }
                         ws.isSpeaking = false;
-                        
-                        // RIGA RIMOSSA: Evita di riattivare i 20s subito dopo l'ultimo suono riprodotto
 
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
