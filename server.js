@@ -31,7 +31,7 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, descrivendo sia il testo scritto sul foglietto sia ciò che si trova sotto o intorno ad esso, in modo chiaro e naturale, pronto per essere letto a voce. Non tradurre in inglese.'
+                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, descrivendo il testo scritto, in modo chiaro e naturale.'
                             },
                             {
                                 role: 'user',
@@ -358,8 +358,8 @@ async function handleCameraTrigger(ws) {
                         ]
                     }
                 ],
-                max_tokens: 800,
-                temperature: 0.7
+                max_tokens: 250,
+                temperature: 0.1
             })
         });
 
