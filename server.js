@@ -106,8 +106,6 @@ function splitTextIntoChunks(text, maxLength = 250) {
 
 async function getSingleTtsPcm(textChunk, volumePercent) {
     try {
-        // Converte automaticamente le ore HH:MM (es. 10:39 -> "le dieci e trentanove")
-        // lasciando intatti i numeri interi o i risultati di calcoli senza due punti (es. 1039)
         let processedText = textChunk.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, (match, hours, minutes) => {
             const h = parseInt(hours, 10);
             const m = parseInt(minutes, 10);
@@ -488,7 +486,7 @@ wss.on('connection', (ws, req) => {
                         }
                         ws.isSpeaking = false;
                         
-                        sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
+                        // RIGA RIMOSSA: Evita di riattivare i 20s subito dopo l'ultimo suono riprodotto
 
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
