@@ -150,8 +150,12 @@ function formatTimeForSpeech(text) {
 }
 
 function splitTextIntoChunks(text, maxLength = 250) {
-    if (text.length <= maxLength) return [text];
-    const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
+    if (!text) return [];
+    // Pulizia preventiva tag think e markdown anomali per evitare balbettii TTS
+    const cleanSanitized = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/[*_#`]/g, '').trim();
+    if (cleanSanitized.length <= maxLength) return [cleanSanitized];
+    
+    const sentences = cleanSanitized.match(/[^.!?]+[.!?]+["']?|.+$/g) || [cleanSanitized];
     let chunks = [];
     let currentChunk = "";
 
@@ -178,7 +182,7 @@ function splitTextIntoChunks(text, maxLength = 250) {
         }
     }
     if (currentChunk) chunks.push(currentChunk.trim());
-    return chunks;
+    return chunks.filter(c => c.length > 0);
 }
 
 async function getSingleTtsPcm(textChunk, volumePercent) {
@@ -191,6 +195,8 @@ async function getSingleTtsPcm(textChunk, volumePercent) {
         const sanitizedText = speechFriendlyText
             .replace(/[^\w\sàèéìòùÀÈÉÌÒÙ.,?!]/g, '')
             .trim();
+
+        if (!sanitizedText) return null;
 
         const cleanText = encodeURIComponent(sanitizedText);
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
