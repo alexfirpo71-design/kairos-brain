@@ -358,8 +358,8 @@ async function handleCameraTrigger(ws) {
                         ]
                     }
                 ],
-                max_tokens: 250,
-                temperature: 0.1
+                max_tokens: 800,
+                temperature: 0.7
             })
         });
 
