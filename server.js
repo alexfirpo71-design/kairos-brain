@@ -348,7 +348,9 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione dettagliata sia del testo scritto sul foglietto sia di ciò che si trova sotto o intorno ad esso, pronta per essere letta a voce. Non tradurre in inglese.'
+{
+    role: 'system',
+    content: 'Sei Kairós. Estrai solo il punto 3 o l informazione principale dal foglietto. Parla solo in italiano, sii brevissimo, non fare descrizioni di contorno.'                
                     },
                     {
                         role: 'user',
