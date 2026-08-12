@@ -30,17 +30,17 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. Descrivi cosa vedi nell immagine in un unica breve frase discorsiva in italiano, leggendo eventuali testi presenti. VIETATO usare elenchi numerati, markdown, asterischi o elenchi puntati. Scrivi solo il testo secco.'
+                                content: 'Sei Kairós, l assistente di Alessandro. Osserva l immagine e scrivi UNICA E ESCLUSIVAMENTE la frase di risposta finale in italiano, descrivendo il testo sul foglietto e ciò che c è intorno. NON inserire passaggi intermedi, elenchi numerati, analisi, tag di pensiero o markdown di alcun tipo. Fornisci solo il testo secco da leggere a voce.'
                             },
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Scrivi solo una frase discorsiva che descrive la scatola e legge il testo del foglietto, senza elenchi o formattazione.' },
+                                    { type: 'text', text: 'Trascrivi il testo sul foglietto e descrivi cosa c è intorno. Rispondi solo con la frase finale.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
                         ],
-                        max_tokens: 120,
+                        max_tokens: 200,
                         temperature: 0.1
                     })
                 });
@@ -56,19 +56,22 @@ const server = createServer(async (req, res) => {
                 
                 let resultText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-                // Pulizia aggressiva di eventuali elenchi numerati o formattazioni residue del modello
-                resultText = resultText.replace(/^\d+\.\s*\*\*.*?\*\*:\s*/gm, '');
-                resultText = resultText.replace(/[\*\#_]/g, '').trim();
-                
-                // Se sono presenti virgolette di draft, estrae la frase racchiusa
-                if (resultText.includes("Draft the response") || resultText.includes("4.")) {
+                // Estrae solo la parte finale pulita se il modello include passaggi numerati o bozze
+                if (resultText.includes("4.")) {
+                    const parts = resultText.split(/4\.\s*\*\*.*?\*\*:/i);
+                    if (parts.length > 1) {
+                        resultText = parts[1].trim().replace(/^["']|["']$/g, '');
+                    }
+                }
+                // Fallamento di sicurezza alternativo se trova virgolette o sezioni di draft
+                if (resultText.includes("Draft the response")) {
                     const match = resultText.match(/["']([^"']+)["']/g);
                     if (match && match.length > 0) {
                         resultText = match[match.length - 1].replace(/["']/g, '');
                     }
                 }
                 
-                console.log(`[Risposta Monitor Pulita] "${resultText}"`);
+                console.log(`[Risposta Monitor] "${resultText}"`);
                 
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
                 res.end(`Immagine ricevuta ed elaborata con successo: ${resultText}`);
@@ -79,8 +82,7 @@ const server = createServer(async (req, res) => {
                     activeWsClient.send(JSON.stringify({ action: 'speak', text: resultText.trim() }));
 
                     try {
-                        // Chunk ridotti a 100 caratteri per una gestione ottimale del flusso
-                        const textChunks = splitTextIntoChunks(resultText, 100);
+                        const textChunks = splitTextIntoChunks(resultText, 150);
                         
                         for (let chunk of textChunks) {
                             if (activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) break;
@@ -91,16 +93,16 @@ const server = createServer(async (req, res) => {
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) break;
                                     
-                                    while (activeWsClient.bufferedAmount > 32768) {
-                                        await new Promise(resolve => setTimeout(resolve, 30));
+                                    while (activeWsClient.bufferedAmount > 65536) {
+                                        await new Promise(resolve => setTimeout(resolve, 20));
                                         if (activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) break;
                                     }
                                     
                                     activeWsClient.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                                 }
                             }
-                            // Pausa di 500ms per non sovraccaricare Google TTS e l'ESP32
-                            await new Promise(resolve => setTimeout(resolve, 500));
+                            // Pausa per evitare il blocco di Google TTS
+                            await new Promise(resolve => setTimeout(resolve, 300));
                         }
 
                         if (activeWsClient.isSpeaking) {
@@ -147,7 +149,7 @@ function formatTimeForSpeech(text) {
     });
 }
 
-function splitTextIntoChunks(text, maxLength = 100) {
+function splitTextIntoChunks(text, maxLength = 250) {
     if (text.length <= maxLength) return [text];
     const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
     let chunks = [];
@@ -465,7 +467,7 @@ wss.on('connection', (ws, req) => {
                     sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                     try {
-                        const textChunks = splitTextIntoChunks(replyText, 100);
+                        const textChunks = splitTextIntoChunks(replyText, 150);
                         
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
@@ -476,16 +478,16 @@ wss.on('connection', (ws, req) => {
                                 for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                     if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     
-                                    while (ws.bufferedAmount > 32768) {
-                                        await new Promise(resolve => setTimeout(resolve, 30));
+                                    while (ws.bufferedAmount > 65536) {
+                                        await new Promise(resolve => setTimeout(resolve, 20));
                                         if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                                     }
                                     
                                     ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                                 }
                             }
-                            // Pausa di sicurezza per i messaggi chat normali
-                            await new Promise(resolve => setTimeout(resolve, 500));
+                            // Pausa per evitare il blocco di Google TTS
+                            await new Promise(resolve => setTimeout(resolve, 300));
                         }
 
                         if (ws.isSpeaking) {
