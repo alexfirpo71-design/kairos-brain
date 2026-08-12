@@ -318,7 +318,6 @@ wss.on('connection', (ws, req) => {
     ws.isSpeaking = false;
     let audioBuffer = [];
 
-    // Finestra di ascolto temporizzata (10 secondi)
     let sessionActiveUntil = 0;
     const SESSION_DURATION_MS = 10000;
 
@@ -377,19 +376,15 @@ wss.on('connection', (ws, req) => {
 
                             const isSessionActive = now < sessionActiveUntil;
 
-                            // Controllo flessibile della Wake Word (gestisce varianti di Whisper)
                             const hasWakeWord = rawText.includes('kairos') || rawText.includes('cairos') || rawText.includes('cairo') || rawText.includes('ehi');
 
-                            // Se la sessione NON è attiva e NON c'è la wake word, IGNORA COMPLETAMENTE
                             if (!isSessionActive && !hasWakeWord) {
                                 console.log(`[Ignorato] Rumore di fondo o parlato estraneo: "${transcript}"`);
-                                return; // Resta completamente in silenzio
+                                return; 
                             }
 
-                            // Estendiamo o attiviamo la sessione per altri 10 secondi
                             sessionActiveUntil = now + SESSION_DURATION_MS;
 
-                            // Comandi rapidi di sistema
                             if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
                                 ws.isSpeaking = false;
                                 ws.send(JSON.stringify({ action: 'stop' }));
@@ -401,22 +396,29 @@ wss.on('connection', (ws, req) => {
                             if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('volume su')) {
                                 currentVolume = Math.min(100, currentVolume + 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             } 
                             else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('volume giu')) {
                                 currentVolume = Math.max(10, currentVolume - 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             } 
                             else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
                                 console.log("[WS] Intenzione telecamera rilevata. Scatto in corso...");
                                 replyText = await handleCameraTrigger(ws);
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             }
                             else {
-                                // Se l'utente ha pronunciato solo la wake word iniziale senza un comando vero e proprio
-                                if (rawText === 'kairos' || rawText === 'ehi kairos' || rawText === 'cairos' || rawText === 'ehi cairos' || rawText === 'ehi' || rawText === 'cairo') {
+                                const isOnlyWakeWord = rawText === 'kairos' || rawText === 'ehi kairos' || rawText === 'cairos' || rawText === 'ehi cairos' || rawText === 'ehi' || rawText === 'cairo' || rawText.length < 5;
+
+                                if (isOnlyWakeWord && !isSessionActive) {
                                     replyText = "Dimmi pure, Alessandro.";
+                                    ws.conversationHistory.push({ role: 'user', content: transcript });
+                                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
                                 } else {
-                                    // Conversazione fluida normale
                                     ws.conversationHistory.push({ role: 'user', content: transcript });
                                     replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
                                     ws.conversationHistory.push({ role: 'assistant', content: replyText });
