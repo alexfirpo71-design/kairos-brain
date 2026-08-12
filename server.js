@@ -28,7 +28,7 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, descrivendo sia il testo scritto sul foglietto sia ciò che si trova sotto o intorno ad esso, in modo chiaro e naturale. Non tradurre in inglese e non inserire tag di pensiero.'
+                                content: 'Sei Kairós, l assistente di Alessandro. L ESP32 ha appena inviato uno scatto dalla telecamera. Rispondi SEMPRE ed esclusivamente in lingua italiana, descrivendo sia il testo scritto sul foglietto sia ciò che si trova sotto o intorno ad esso, in modo chiaro e naturale. Non tradurre in inglese.'
                             },
                             {
                                 role: 'user',
@@ -48,8 +48,12 @@ const server = createServer(async (req, res) => {
                     console.error(`[Errore Dettagliato Groq] Status: ${visionResponse.status} - Body: ${errorBody}`);
                     throw new Error(`Errore API: ${visionResponse.status}`);
                 }
+                
                 const visionData = await visionResponse.json();
-                let resultText = visionData.choices[0].message.content.trim();
+                let rawText = visionData.choices[0].message.content.trim();
+                
+                // Rimuove eventuali blocchi di pensiero (<think>...</think>) generati dal modello
+                let resultText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
                 
                 console.log(`[Risposta Monitor] "${resultText}"`);
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -299,7 +303,7 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione dettagliata sia del testo scritto sul foglietto sia di ciò che si trova sotto o intorno ad esso, pronta per essere letta a voce. Non tradurre in inglese e non inserire tag di pensiero.'
+                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione dettagliata sia del testo scritto sul foglietto sia di ciò che si trova sotto o intorno ad esso, pronta per essere letta a voce. Non tradurre in inglese.'
                     },
                     {
                         role: 'user',
@@ -317,7 +321,10 @@ async function handleCameraTrigger(ws) {
         if (!visionResponse.ok) throw new Error(`Errore API Vision: ${visionResponse.status}`);
         
         const visionData = await visionResponse.json();
-        const description = visionData.choices[0].message.content.trim();
+        let rawDescription = visionData.choices[0].message.content.trim();
+        
+        // Rimuove eventuali blocchi di pensiero (<think>...</think>) generati dal modello
+        let description = rawDescription.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
         
         console.log(`[Camera Risposta Monitor] "${description}"`);
         return description;
