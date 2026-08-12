@@ -318,6 +318,10 @@ wss.on('connection', (ws, req) => {
     ws.isSpeaking = false;
     let audioBuffer = [];
 
+    // Finestra di ascolto temporizzata (10 secondi) per evitare falsi attivazioni
+    let sessionActiveUntil = 0;
+    const SESSION_DURATION_MS = 10000;
+
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 
@@ -362,18 +366,40 @@ wss.on('connection', (ws, req) => {
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
                     audioBuffer = [];
 
-                    let replyText = "Ricevuto.";
+                    let replyText = null; // Se rimane null, non risponde e sta zitto
                     try {
                         const transcript = await transcribeAudio(completeAudioBuffer);
                         console.log(`[Whisper] Trascritto: "${transcript}"`);
                         
                         if (transcript && transcript.trim().length > 0) {
                             const rawText = transcript.toLowerCase().replace(/[.,\/$%\^&\*;:{}=\-_`~()?]/g, "").trim();
+                            const now = Date.now();
+
+                            // Controllo Wake Word (es. "ehi kairos" o "kairos")
+                            const hasWakeWord = rawText.includes('kairos');
+
+                            if (hasWakeWord) {
+                                sessionActiveUntil = now + SESSION_DURATION_MS;
+                                console.log("[WakeWord] Rilevata! Sessione attiva per 10 secondi.");
+                            }
+
+                            const isSessionActive = now < sessionActiveUntil;
+
+                            // Se NON c'è la wake word E la sessione è scaduta, SCARTA IL RUMORE E RESTA ZITTO
+                            if (!hasWakeWord && !isSessionActive) {
+                                console.log(`[Ignorato] Audio spurio o rumore di fondo (Sessione chiusa): "${transcript}"`);
+                                return; // Esce senza impostare replyText e senza emettere TTS
+                            }
+
+                            // Se siamo qui, la sessione è attiva (o è appena stata aperta dalla wake word)
+                            // Ricarichiamo il timer per altri 10 secondi per consentire una conversazione fluida
+                            sessionActiveUntil = now + SESSION_DURATION_MS;
 
                             if (rawText.includes('stop') || rawText.includes('stopp') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
                                 ws.isSpeaking = false;
                                 ws.send(JSON.stringify({ action: 'stop' }));
                                 console.log("[Comando] Interruzione eseguita.");
+                                sessionActiveUntil = 0; // Chiude anche la sessione
                                 return;
                             }
 
@@ -406,6 +432,9 @@ wss.on('connection', (ws, req) => {
                         console.error("[Errore IA]", err);
                         replyText = "Si è verificato un errore di elaborazione.";
                     }
+
+                    // Se per qualche motivo replyText è vuoto o nullo, non inviamo nulla
+                    if (!replyText) return;
 
                     ws.isSpeaking = true;
                     ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
