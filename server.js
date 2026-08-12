@@ -179,7 +179,7 @@ async function getSingleTtsPcm(textChunk, volumePercent) {
             .trim();
 
         const cleanText = encodeURIComponent(sanitizedText);
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&hl=it&client=tw-ob`;
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
         
         const response = await fetch(ttsUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
@@ -348,9 +348,7 @@ async function handleCameraTrigger(ws) {
                 messages: [
                     {
                         role: 'system',
-{
-    role: 'system',
-    content: 'Sei Kairós. Estrai solo il punto 3 o l informazione principale dal foglietto. Parla solo in italiano, sii brevissimo, non fare descrizioni di contorno.'                
+                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione dettagliata sia del testo scritto sul foglietto sia di ciò che si trova sotto o intorno ad esso, pronta per essere letta a voce. Non tradurre in inglese.'
                     },
                     {
                         role: 'user',
@@ -360,7 +358,7 @@ async function handleCameraTrigger(ws) {
                         ]
                     }
                 ],
-                max_tokens: 3000,
+                max_tokens: 250,
                 temperature: 0.1
             })
         });
