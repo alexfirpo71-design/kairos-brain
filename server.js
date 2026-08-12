@@ -7,19 +7,29 @@ import { spawn } from 'child_process';
 let lastImageBuffer = null;
 
 const server = createServer(async (req, res) => {
-    // Pagina web di monitoraggio opzionale
+    // Pagina web di monitoraggio opzionale su http://localhost:3000
     if (req.url === '/' || req.url === '/monitor') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`
             <html>
-            <head><title>Kairós Monitor</title></head>
-            <body style="background:#121212; color:#e0e0e0; font-family:sans-serif; text-align:center; margin-top:40px;">
-                <h2 style="color:#4CAF50;">Kairós - Live Camera Monitor</h2>
-                <p>Ultimo scatto aggiornato in tempo reale</p><br>
-                <img id="cam" src="/image?t=" style="max-width:85%; border-radius:10px; border:2px solid #333;" /><br><br>
+            <head>
+                <title>Kairós Monitor</title>
+                <style>
+                    body { background: #121212; color: #e0e0e0; font-family: sans-serif; text-align: center; margin-top: 40px; }
+                    h2 { color: #4CAF50; }
+                    img { max-width: 85%; border-radius: 10px; border: 2px solid #333; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+                    p { color: #888; font-size: 14px; }
+                </style>
+            </head>
+            <body>
+                <h2>Kairós - Live Camera Monitor</h2>
+                <p>Ultimo scatto aggiornato in tempo reale</p>
+                <br>
+                <img id="cam" src="/image?t=" alt="In attesa di scatto..." />
                 <script>
                     setInterval(() => {
-                        document.getElementById('cam').src = '/image?t=' + Date.now();
+                        const img = document.getElementById('cam');
+                        img.src = '/image?t=' + Date.now();
                     }, 2000);
                 </script>
             </body>
@@ -28,6 +38,7 @@ const server = createServer(async (req, res) => {
         return;
     }
 
+    // Endpoint per servire l'immagine binaria al browser del monitor
     if (req.url.startsWith('/image')) {
         if (lastImageBuffer) {
             res.writeHead(200, { 'Content-Type': 'image/jpeg' });
@@ -52,7 +63,7 @@ const server = createServer(async (req, res) => {
                     return;
                 }
 
-                lastImageBuffer = imageBuffer;
+                lastImageBuffer = imageBuffer; // Salva l'immagine per il monitor visivo
                 console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, elaborazione in corso...");
                 const apiKey = process.env.GROQ_API_KEY;
                 
@@ -244,69 +255,6 @@ async function getGroqChatResponse(conversationHistory, userName = "Alessandro")
     return data.choices[0].message.content;
 }
 
-// Funzione dedicata per gestire lo scatto da comando vocale
-async function handleCameraTrigger(ws) {
-    const cameraUrl = "http://192.168.1.152:8080/shot.jpg";
-    console.log("[Camera] Contattando la telecamera IP su comando vocale...");
-    
-    try {
-        const imageBuffer = await new Promise((resolve, reject) => {
-            const req = http.get(cameraUrl, (res) => {
-                if (res.statusCode !== 200) {
-                    reject(new Error(`HTTP error! status: ${res.statusCode}`));
-                    return;
-                }
-                let chunks = [];
-                res.on('data', chunk => chunks.push(chunk));
-                res.on('end', () => resolve(Buffer.concat(chunks)));
-            });
-            req.on('error', err => reject(err));
-            req.setTimeout(5000, () => {
-                req.destroy();
-                reject(new Error("Timeout di connessione alla telecamera"));
-            });
-        });
-
-        lastImageBuffer = imageBuffer;
-        const apiKey = process.env.GROQ_API_KEY;
-        const base64Image = imageBuffer.toString('base64');
-        
-        const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'qwen/qwen3.6-27b',
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'Sei Kairós, un assistente vocale. Fornisci SEMPRE in lingua italiana una descrizione dettagliata sia del testo scritto sul foglietto sia di ciò che si trova sotto o intorno ad esso, pronta per essere letta a voce.'
-                    },
-                    {
-                        role: 'user',
-                        content: [
-                            { type: 'text', text: 'Trascrivi il testo scritto sul foglietto e descrivi cosa c e sotto o intorno al foglietto in italiano.' },
-                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-                        ]
-                    }
-                ],
-                max_tokens: 250,
-                temperature: 0.0
-            })
-        });
-
-        if (!visionResponse.ok) throw new Error(`Errore API Vision: ${visionResponse.status}`);
-        
-        const visionData = await visionResponse.json();
-        const description = visionData.choices[0].message.content.trim();
-        
-        console.log(`[Camera Risposta Monitor] "${description}"`);
-        return description;
-    } catch (err) {
-        console.error("[Errore Camera]", err.message);
-        return "Non sono riuscito ad accedere alla telecamera.";
-    }
-}
-
 wss.on('connection', (ws, req) => {
     console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
     ws.userName = "Alessandro";
@@ -351,19 +299,12 @@ wss.on('connection', (ws, req) => {
                                 return;
                             }
 
-                            // Rilevamento comando vocale per la telecamera
-                            if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('vedi') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
-                                console.log("[WS] Intenzione telecamera rilevata da comando vocale. Scatto in corso...");
-                                replyText = await handleCameraTrigger(ws);
-                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
-                            } else {
-                                ws.conversationHistory.push({ role: 'user', content: transcript });
-                                replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                            ws.conversationHistory.push({ role: 'user', content: transcript });
+                            replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                            ws.conversationHistory.push({ role: 'assistant', content: replyText });
 
-                                if (ws.conversationHistory.length > 10) {
-                                    ws.conversationHistory = ws.conversationHistory.slice(-10);
-                                }
+                            if (ws.conversationHistory.length > 10) {
+                                ws.conversationHistory = ws.conversationHistory.slice(-10);
                             }
                         }
                     } catch (err) {
