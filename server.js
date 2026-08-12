@@ -318,7 +318,7 @@ wss.on('connection', (ws, req) => {
     ws.isSpeaking = false;
     let audioBuffer = [];
 
-    // Finestra di ascolto temporizzata (10 secondi) per evitare falsi attivazioni
+    // Finestra di ascolto temporizzata (10 secondi)
     let sessionActiveUntil = 0;
     const SESSION_DURATION_MS = 10000;
 
@@ -366,7 +366,7 @@ wss.on('connection', (ws, req) => {
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
                     audioBuffer = [];
 
-                    let replyText = null; // Se rimane null, non risponde e sta zitto
+                    let replyText = null; 
                     try {
                         const transcript = await transcribeAudio(completeAudioBuffer);
                         console.log(`[Whisper] Trascritto: "${transcript}"`);
@@ -375,54 +375,55 @@ wss.on('connection', (ws, req) => {
                             const rawText = transcript.toLowerCase().replace(/[.,\/$%\^&\*;:{}=\-_`~()?]/g, "").trim();
                             const now = Date.now();
 
-                            // Controllo Wake Word (es. "ehi kairos" o "kairos")
-                            const hasWakeWord = rawText.includes('kairos');
-
-                            if (hasWakeWord) {
-                                sessionActiveUntil = now + SESSION_DURATION_MS;
-                                console.log("[WakeWord] Rilevata! Sessione attiva per 10 secondi.");
-                            }
-
                             const isSessionActive = now < sessionActiveUntil;
 
-                            // Se NON c'è la wake word E la sessione è scaduta, SCARTA IL RUMORE E RESTA ZITTO
-                            if (!hasWakeWord && !isSessionActive) {
-                                console.log(`[Ignorato] Audio spurio o rumore di fondo (Sessione chiusa): "${transcript}"`);
-                                return; // Esce senza impostare replyText e senza emettere TTS
+                            // Controllo flessibile della Wake Word (gestisce varianti di Whisper)
+                            const hasWakeWord = rawText.includes('kairos') || rawText.includes('cairos') || rawText.includes('cairo') || rawText.includes('ehi');
+
+                            // Se la sessione NON è attiva e NON c'è la wake word, IGNORA COMPLETAMENTE
+                            if (!isSessionActive && !hasWakeWord) {
+                                console.log(`[Ignorato] Rumore di fondo o parlato estraneo: "${transcript}"`);
+                                return; // Resta completamente in silenzio
                             }
 
-                            // Se siamo qui, la sessione è attiva (o è appena stata aperta dalla wake word)
-                            // Ricarichiamo il timer per altri 10 secondi per consentire una conversazione fluida
+                            // Estendiamo o attiviamo la sessione per altri 10 secondi
                             sessionActiveUntil = now + SESSION_DURATION_MS;
 
-                            if (rawText.includes('stop') || rawText.includes('stopp') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
+                            // Comandi rapidi di sistema
+                            if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
                                 ws.isSpeaking = false;
                                 ws.send(JSON.stringify({ action: 'stop' }));
                                 console.log("[Comando] Interruzione eseguita.");
-                                sessionActiveUntil = 0; // Chiude anche la sessione
+                                sessionActiveUntil = 0; 
                                 return;
                             }
 
-                            if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('più alto') || rawText.includes('volume su')) {
+                            if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('volume su')) {
                                 currentVolume = Math.min(100, currentVolume + 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
                             } 
-                            else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('più basso') || rawText.includes('volume giu') || rawText.includes('volume giù')) {
+                            else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('volume giu')) {
                                 currentVolume = Math.max(10, currentVolume - 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
                             } 
-                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('vedi') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
-                                console.log("[WS] Intenzione telecamera rilevata da comando vocale. Scatto in corso...");
+                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
+                                console.log("[WS] Intenzione telecamera rilevata. Scatto in corso...");
                                 replyText = await handleCameraTrigger(ws);
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             }
                             else {
-                                ws.conversationHistory.push({ role: 'user', content: transcript });
-                                replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                                // Se l'utente ha pronunciato solo la wake word iniziale senza un comando vero e proprio
+                                if (rawText === 'kairos' || rawText === 'ehi kairos' || rawText === 'cairos' || rawText === 'ehi cairos' || rawText === 'ehi' || rawText === 'cairo') {
+                                    replyText = "Dimmi pure, Alessandro.";
+                                } else {
+                                    // Conversazione fluida normale
+                                    ws.conversationHistory.push({ role: 'user', content: transcript });
+                                    replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
 
-                                if (ws.conversationHistory.length > 10) {
-                                    ws.conversationHistory = ws.conversationHistory.slice(-10);
+                                    if (ws.conversationHistory.length > 10) {
+                                        ws.conversationHistory = ws.conversationHistory.slice(-10);
+                                    }
                                 }
                             }
 
@@ -433,7 +434,6 @@ wss.on('connection', (ws, req) => {
                         replyText = "Si è verificato un errore di elaborazione.";
                     }
 
-                    // Se per qualche motivo replyText è vuoto o nullo, non inviamo nulla
                     if (!replyText) return;
 
                     ws.isSpeaking = true;
