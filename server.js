@@ -1,125 +1,97 @@
 import http, { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import fetch from 'node-fetch';
-import FormData from 'form-data';
 import { spawn } from 'child_process';
 import readline from 'readline';
 
 let activeWsClient = null;
 let currentVolume = 70;
-const SESSION_DURATION_MS = 20000;
-const sessionHistories = new Map();
 
-// --- CONFIGURAZIONE COMANDO TASTIERA ---
+// Configurazione Terminale per tasto 'c'
 readline.emitKeypressEvents(process.stdin);
 if (process.stdin.isTTY) process.stdin.setRawMode(true);
 
-const server = createServer(async (req, res) => {
-    if (req.method === 'POST' && req.url === '/upload') {
-        let buffers = [];
-        req.on('data', chunk => buffers.push(chunk));
-        req.on('end', async () => {
-            const imageBuffer = Buffer.concat(buffers);
-            // Logica di upload esistente...
-            res.writeHead(200); res.end('OK');
-        });
-    } else {
-        res.writeHead(200); res.end('Kairos Brain Server running!');
-    }
+const server = createServer((req, res) => {
+    res.writeHead(200); res.end('Kairos Server is up.');
 });
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// --- FUNZIONI DI SUPPORTO ---
+// --- FUNZIONI UTILITY ---
 
-function formatTimeForSpeech(text) {
-    return text.replace(/\b([0-2]?[0-9])[:\.]([0-5][0-9])\b/g, (match, h, m) => {
-        let hourText = parseInt(h) === 1 ? "l'una" : `le ${parseInt(h)}`;
-        return parseInt(m) === 0 ? `${hourText} in punto` : `${hourText} e ${m}`;
-    });
-}
-
-function splitTextIntoChunks(text, maxLength = 300) {
+function splitTextIntoChunks(text, maxLength = 250) {
+    // Divide in frasi per non troncare le parole
     const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
     let chunks = [];
-    let currentChunk = "";
-    for (let sentence of sentences) {
-        if ((currentChunk + sentence).length <= maxLength) currentChunk += sentence;
+    let current = "";
+    for (let s of sentences) {
+        if ((current + s).length <= maxLength) current += s;
         else {
-            if (currentChunk) chunks.push(currentChunk.trim());
-            currentChunk = sentence;
+            if (current) chunks.push(current.trim());
+            current = s;
         }
     }
-    if (currentChunk) chunks.push(currentChunk.trim());
+    if (current) chunks.push(current.trim());
     return chunks;
 }
 
-async function getSingleTtsPcm(textChunk, volumePercent) {
+async function getSingleTtsPcm(text, volumePercent) {
     try {
-        const cleanText = encodeURIComponent(formatTimeForSpeech(textChunk).replace(/[^\w\sàèéìòùÀÈÉÌÒÙ.,?!]/g, ''));
+        const cleanText = encodeURIComponent(text.replace(/[^\w\sàèéìòù.,?!]/g, ''));
         const response = await fetch(`https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`);
         const mp3Buffer = Buffer.from(await response.arrayBuffer());
         
-        return await new Promise((resolve, reject) => {
+        return await new Promise((resolve) => {
             const ffmpeg = spawn('ffmpeg', ['-i', 'pipe:0', '-af', `volume=${Math.max(0.05, volumePercent / 70)}`, '-f', 's16le', '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '16000', 'pipe:1']);
             let chunks = [];
-            ffmpeg.stdout.on('data', chunk => chunks.push(chunk));
-            ffmpeg.on('close', code => code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error('FFmpeg error')));
+            ffmpeg.stdout.on('data', c => chunks.push(c));
+            ffmpeg.on('close', () => resolve(Buffer.concat(chunks)));
             ffmpeg.stdin.write(mp3Buffer); ffmpeg.stdin.end();
         });
-    } catch (err) { console.error("[TTS Error]", err); return null; }
-}
-
-async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: 'llama-3.1-8b-instant',
-            messages: [{ role: 'system', content: "Sei Kairós, assistente di Alessandro. Sii diretto e sintetico." }, ...conversationHistory],
-            max_tokens: 500, // Aumentato per non troncare le liste
-            temperature: 0.7
-        })
-    });
-    const data = await response.json();
-    return data.choices[0].message.content;
+    } catch (e) { return null; }
 }
 
 async function handleCameraTrigger() {
-    const imageBuffer = await new Promise((resolve) => {
-        http.get("http://192.168.1.154:8080/shot.jpg", (res) => {
-            let chunks = []; res.on('data', c => chunks.push(c)); res.on('end', () => resolve(Buffer.concat(chunks)));
-        }).on('error', () => resolve(null));
-    });
+    console.log("[Camera] Richiesta scatto...");
+    return await new Promise((resolve) => {
+        http.get("http://192.168.1.154:8080/shot.jpg", async (res) => {
+            let chunks = [];
+            res.on('data', c => chunks.push(c));
+            res.on('end', async () => {
+                const buffer = Buffer.concat(chunks);
+                console.log(`[Camera] Ricevuti: ${buffer.length} bytes`);
+                
+                if (buffer.length < 5000) return resolve("Foto troppo piccola, riprova.");
 
-    const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: 'qwen/qwen3.6-27b',
-            messages: [{
-                role: 'system',
-                content: 'Sei Kairós. Analizza l immagine ed estrai solo le informazioni principali. Massima sintesi (massimo 2 frasi). Non spiegare il contesto.'
-            }, {
-                role: 'user',
-                content: [{ type: 'text', text: 'Cosa vedi?' }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }]
-            }],
-            max_tokens: 100, // Ridotto per sintesi
-            temperature: 0.1
-        })
+                const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'qwen/qwen3.6-27b',
+                        messages: [
+                            { role: 'system', content: 'Sei Kairós. Estrai solo il testo principale o il soggetto. Sii estremamente sintetica, massimo 2 frasi.' },
+                            { role: 'user', content: [{ type: 'text', text: 'Cosa vedi?' }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${buffer.toString('base64')}` } }] }
+                        ],
+                        max_tokens: 100,
+                        temperature: 0.1
+                    })
+                });
+                const data = await visionResponse.json();
+                resolve(data.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim());
+            });
+        }).on('error', () => resolve("Errore connessione camera."));
     });
-    const data = await visionResponse.json();
-    return data.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
-// --- GESTIONE TASTIERA E WS ---
+// --- LOGICA COMANDI TASTIERA ---
 process.stdin.on('keypress', async (str, key) => {
     if (key.ctrl && key.name === 'c') process.exit();
     if (str === 'c' && activeWsClient) {
-        console.log("\n[Tastiera] Comando ricevuto: scatto foto...");
-        const desc = await handleCameraTrigger();
-        activeWsClient.send(JSON.stringify({ action: 'speak', text: desc }));
-        const chunks = splitTextIntoChunks(desc, 300);
+        console.log("\n[Tastiera] Tasto 'c' premuto.");
+        const text = await handleCameraTrigger();
+        activeWsClient.send(JSON.stringify({ action: 'speak', text }));
+        
+        const chunks = splitTextIntoChunks(text, 250);
         for (let chunk of chunks) {
             const pcm = await getSingleTtsPcm(chunk, currentVolume);
             if (pcm) activeWsClient.send(pcm, { binary: true });
@@ -129,7 +101,7 @@ process.stdin.on('keypress', async (str, key) => {
 
 wss.on('connection', (ws) => {
     activeWsClient = ws;
-    ws.on('message', async (message) => { /* Logica messaggi esistente */ });
+    console.log("Dispositivo connesso.");
 });
 
-server.listen(process.env.PORT || 3000, () => console.log("Server Kairós attivo. Premi 'c' per scattare."));
+server.listen(process.env.PORT || 3000, () => console.log("Server pronto. Premi 'c' per scattare foto."));
