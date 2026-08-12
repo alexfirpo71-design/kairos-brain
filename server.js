@@ -106,20 +106,8 @@ function splitTextIntoChunks(text, maxLength = 250) {
 
 async function getSingleTtsPcm(textChunk, volumePercent) {
     try {
-        let processedText = textChunk.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, (match, hours, minutes) => {
-            const h = parseInt(hours, 10);
-            const m = parseInt(minutes, 10);
-            
-            let hourStr = h === 1 ? "l'una" : `le ${h}`;
-            if (m === 0) return `${hourStr} in punto`;
-            if (m === 15) return `${hourStr} e un quarto`;
-            if (m === 30) return `${hourStr} e mezzo`;
-            if (m === 45) return `le ${h === 12 ? 1 : h + 1} meno un quarto`;
-            
-            return `${hourStr} e ${m}`;
-        });
-
-        const speechFriendlyText = processedText
+        // NESSUNA CONVERSIONE FORZATA DI ORARIO: i numeri vengono letti così come arrivano (es. 1201 -> milleduecentouno)
+        const speechFriendlyText = textChunk
             .replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
 
         const sanitizedText = speechFriendlyText
@@ -480,29 +468,13 @@ wss.on('connection', (ws, req) => {
 
                         if (ws.isSpeaking) {
                             console.log("[WS] Streaming audio completato.");
-                            
-                            const closingPhrase = " Prego e buona giornata.";
-                            const closingPcm = await getSingleTtsPcm(closingPhrase, currentVolume);
-                            
-                            if (closingPcm && closingPcm.length > 0) {
-                                const chunkSize = 4096;
-                                for (let i = 0; i < closingPcm.length; i += chunkSize) {
-                                    if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                                    
-                                    while (ws.bufferedAmount > 65536) {
-                                        await new Promise(resolve => setTimeout(resolve, 20));
-                                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                                    }
-                                    
-                                    ws.send(closingPcm.subarray(i, i + Math.min(chunkSize, closingPcm.length - i)), { binary: true });
-                                }
-                            }
-
                             if (ws.readyState === ws.OPEN) {
                                 ws.send(JSON.stringify({ action: 'stop' }));
                             }
                         }
                         ws.isSpeaking = false;
+                        
+                        sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
