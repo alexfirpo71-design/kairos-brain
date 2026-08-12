@@ -179,7 +179,7 @@ async function getSingleTtsPcm(textChunk, volumePercent) {
             .trim();
 
         const cleanText = encodeURIComponent(sanitizedText);
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&hl=it&client=tw-ob`;
         
         const response = await fetch(ttsUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
@@ -358,7 +358,7 @@ async function handleCameraTrigger(ws) {
                         ]
                     }
                 ],
-                max_tokens: 250,
+                max_tokens: 300,
                 temperature: 0.1
             })
         });
