@@ -4,53 +4,7 @@ import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { spawn } from 'child_process';
 
-// Variabile globale per memorizzare l'ultimo frame ricevuto dalla telecamera
-let lastImageBuffer = null;
-
 const server = createServer(async (req, res) => {
-    // Pagina web di monitoraggio visivo opzionale su http://localhost:3000
-    if (req.url === '/' || req.url === '/monitor') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`
-            <html>
-            <head>
-                <title>Kairós Monitor</title>
-                <style>
-                    body { background: #121212; color: #e0e0e0; font-family: sans-serif; text-align: center; margin-top: 40px; }
-                    h2 { color: #4CAF50; }
-                    img { max-width: 85%; border-radius: 10px; border: 2px solid #333; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-                    p { color: #888; font-size: 14px; }
-                </style>
-            </head>
-            <body>
-                <h2>Kairós - Live Camera Monitor</h2>
-                <p>Ultimo scatto aggiornato in tempo reale</p>
-                <br>
-                <img id="cam" src="/image?t=" alt="In attesa di scatto..." />
-                <script>
-                    setInterval(() => {
-                        const img = document.getElementById('cam');
-                        img.src = '/image?t=' + Date.now();
-                    }, 2000);
-                </script>
-            </body>
-            </html>
-        `);
-        return;
-    }
-
-    // Endpoint per servire l'immagine binaria al browser del monitor
-    if (req.url.startsWith('/image')) {
-        if (lastImageBuffer) {
-            res.writeHead(200, { 'Content-Type': 'image/jpeg' });
-            res.end(lastImageBuffer);
-        } else {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('Nessuna immagine disponibile');
-        }
-        return;
-    }
-
     if (req.method === 'POST' && req.url === '/upload') {
         let buffers = [];
         req.on('data', chunk => buffers.push(chunk));
@@ -63,7 +17,6 @@ const server = createServer(async (req, res) => {
                     return;
                 }
 
-                lastImageBuffer = imageBuffer; // Salva l'immagine per il monitor visivo
                 console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, elaborazione in corso...");
                 const apiKey = process.env.GROQ_API_KEY;
                 
@@ -80,7 +33,7 @@ const server = createServer(async (req, res) => {
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi il testo scritto sul foglietto e descrivi dettagliatamente cosa c e sotto o intorno al foglietto in italiano.' },
+                                    { type: 'text', text: 'Trascrivi il testo scritto sul foglietto e descrivi cosa c e sotto o intorno al foglietto in italiano.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
@@ -119,6 +72,20 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 const sessionHistories = new Map();
 let currentVolume = 70;
 
+function formatTimeForSpeech(text) {
+    return text.replace(/\b([0-2]?[0-9])[:\.]([0-5][0-9])\b/g, (match, hours, minutes) => {
+        const h = parseInt(hours, 10);
+        const m = parseInt(minutes, 10);
+        
+        let hourText = h === 1 ? "l'una" : `le ${h}`;
+        if (h === 0) hourText = "le ore zero";
+        
+        if (m === 0) return `${hourText} in punto`;
+        if (m < 10) return `${hourText} e zero ${m}`;
+        return `${hourText} e ${m}`;
+    });
+}
+
 function splitTextIntoChunks(text, maxLength = 250) {
     if (text.length <= maxLength) return [text];
     const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
@@ -153,7 +120,9 @@ function splitTextIntoChunks(text, maxLength = 250) {
 
 async function getSingleTtsPcm(textChunk, volumePercent) {
     try {
-        const speechFriendlyText = textChunk
+        const timeFormatted = formatTimeForSpeech(textChunk);
+
+        const speechFriendlyText = timeFormatted
             .replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
 
         const sanitizedText = speechFriendlyText
@@ -319,7 +288,6 @@ async function handleCameraTrigger(ws) {
             });
         });
 
-        lastImageBuffer = imageBuffer;
         const apiKey = process.env.GROQ_API_KEY;
         const base64Image = imageBuffer.toString('base64');
         
@@ -366,6 +334,9 @@ wss.on('connection', (ws, req) => {
     ws.isSpeaking = false;
     let audioBuffer = [];
 
+    let sessionActiveUntil = 0;
+    const SESSION_DURATION_MS = 20000;
+
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 
@@ -380,6 +351,7 @@ wss.on('connection', (ws, req) => {
 
     ws.on('message', async (message, isBinary) => {
         if (isBinary) {
+            if (ws.isSpeaking) return;
             audioBuffer.push(message);
         } else {
             try {
@@ -410,41 +382,67 @@ wss.on('connection', (ws, req) => {
                     const completeAudioBuffer = Buffer.concat(audioBuffer);
                     audioBuffer = [];
 
-                    let replyText = "Ricevuto.";
+                    let replyText = null; 
                     try {
                         const transcript = await transcribeAudio(completeAudioBuffer);
                         console.log(`[Whisper] Trascritto: "${transcript}"`);
                         
                         if (transcript && transcript.trim().length > 0) {
                             const rawText = transcript.toLowerCase().replace(/[.,\/$%\^&\*;:{}=\-_`~()?]/g, "").trim();
+                            const now = Date.now();
 
-                            if (rawText.includes('stop') || rawText.includes('stopp') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
+                            const isSessionActive = now < sessionActiveUntil;
+
+                            const hasWakeWord = rawText.includes('kairos') || rawText.includes('cairos') || rawText.includes('cairo') || rawText.includes('ehi');
+
+                            if (!isSessionActive && !hasWakeWord) {
+                                console.log(`[Ignorato] Rumore di fondo o parlato estraneo: "${transcript}"`);
+                                return; 
+                            }
+
+                            sessionActiveUntil = now + SESSION_DURATION_MS;
+
+                            if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
                                 ws.isSpeaking = false;
                                 ws.send(JSON.stringify({ action: 'stop' }));
                                 console.log("[Comando] Interruzione eseguita.");
+                                sessionActiveUntil = 0; 
                                 return;
                             }
 
-                            if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('più alto') || rawText.includes('volume su')) {
+                            if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('volume su')) {
                                 currentVolume = Math.min(100, currentVolume + 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             } 
-                            else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('più basso') || rawText.includes('volume giu') || rawText.includes('volume giù')) {
+                            else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('volume giu')) {
                                 currentVolume = Math.max(10, currentVolume - 15);
                                 replyText = `Volume al ${currentVolume} per cento.`;
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             } 
-                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('vedi') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
-                                console.log("[WS] Intenzione telecamera rilevata da comando vocale. Scatto in corso...");
+                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
+                                console.log("[WS] Intenzione telecamera rilevata. Scatto in corso...");
                                 replyText = await handleCameraTrigger(ws);
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             }
                             else {
-                                ws.conversationHistory.push({ role: 'user', content: transcript });
-                                replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                                const isOnlyWakeWord = rawText === 'kairos' || rawText === 'ehi kairos' || rawText === 'cairos' || rawText === 'ehi cairos' || rawText === 'ehi' || rawText === 'cairo' || rawText.length < 5;
 
-                                if (ws.conversationHistory.length > 10) {
-                                    ws.conversationHistory = ws.conversationHistory.slice(-10);
+                                if (isOnlyWakeWord && !isSessionActive) {
+                                    replyText = "Dimmi pure, Alessandro.";
+                                    ws.conversationHistory.push({ role: 'user', content: transcript });
+                                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                                } else {
+                                    ws.conversationHistory.push({ role: 'user', content: transcript });
+                                    replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
+
+                                    if (ws.conversationHistory.length > 10) {
+                                        ws.conversationHistory = ws.conversationHistory.slice(-10);
+                                    }
                                 }
                             }
 
@@ -455,8 +453,12 @@ wss.on('connection', (ws, req) => {
                         replyText = "Si è verificato un errore di elaborazione.";
                     }
 
+                    if (!replyText) return;
+
                     ws.isSpeaking = true;
                     ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
+
+                    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 150);
@@ -487,6 +489,8 @@ wss.on('connection', (ws, req) => {
                             }
                         }
                         ws.isSpeaking = false;
+                        
+                        sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                     } catch (streamErr) {
                         console.error("[Errore Streaming Audio]", streamErr);
