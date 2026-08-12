@@ -33,7 +33,7 @@ const server = createServer(async (req, res) => {
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi il testo scritto sul foglietto e descrivi dettagliatamente cosa c e sotto o intorno al foglietto in italiano.' },
+                                    { type: 'text', text: 'Trascrivi il testo scritto sul foglietto e descrivi cosa c e sotto o intorno al foglietto in italiano.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
@@ -106,7 +106,22 @@ function splitTextIntoChunks(text, maxLength = 250) {
 
 async function getSingleTtsPcm(textChunk, volumePercent) {
     try {
-        const speechFriendlyText = textChunk
+        // Converte automaticamente le ore HH:MM (es. 10:39 -> "le dieci e trentanove")
+        // lasciando intatti i numeri interi o i risultati di calcoli senza due punti (es. 1039)
+        let processedText = textChunk.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, (match, hours, minutes) => {
+            const h = parseInt(hours, 10);
+            const m = parseInt(minutes, 10);
+            
+            let hourStr = h === 1 ? "l'una" : `le ${h}`;
+            if (m === 0) return `${hourStr} in punto`;
+            if (m === 15) return `${hourStr} e un quarto`;
+            if (m === 30) return `${hourStr} e mezzo`;
+            if (m === 45) return `le ${h === 12 ? 1 : h + 1} meno un quarto`;
+            
+            return `${hourStr} e ${m}`;
+        });
+
+        const speechFriendlyText = processedText
             .replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
 
         const sanitizedText = speechFriendlyText
@@ -318,7 +333,6 @@ wss.on('connection', (ws, req) => {
     ws.isSpeaking = false;
     let audioBuffer = [];
 
-    // Finestra di dialogo estesa a 20 secondi per il botta e risposta continuo
     let sessionActiveUntil = 0;
     const SESSION_DURATION_MS = 20000;
 
@@ -384,7 +398,6 @@ wss.on('connection', (ws, req) => {
                                 return; 
                             }
 
-                            // Tieni aperta la sessione per altri 20 secondi da questo momento
                             sessionActiveUntil = now + SESSION_DURATION_MS;
 
                             if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
@@ -443,7 +456,6 @@ wss.on('connection', (ws, req) => {
                     ws.isSpeaking = true;
                     ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
 
-                    // Estendiamo ulteriormente la sessione anche dal momento in cui l'assistente risponde
                     sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                     try {
@@ -476,7 +488,6 @@ wss.on('connection', (ws, req) => {
                         }
                         ws.isSpeaking = false;
                         
-                        // Rinnova la sessione anche alla fine del playback audio
                         sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                     } catch (streamErr) {
