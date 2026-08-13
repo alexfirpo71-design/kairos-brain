@@ -23,27 +23,27 @@ const server = createServer(async (req, res) => {
                 const apiKey = process.env.GROQ_API_KEY;
                 
                 const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: 'qwen/qwen3.6-27b',
-                        messages: [
-                            {
-                                role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. Osserva l immagine e scrivi UNICA E ESCLUSIVAMENTE la frase di risposta finale in italiano, descrivendo il testo sul foglietto e ciò che c è intorno. NON inserire passaggi intermedi, elenchi numerati, analisi, tag di pensiero o markdown di alcun tipo. Fornisci solo il testo secco da leggere a voce.'
-                            },
-                            {
-                                role: 'user',
-                                content: [
-                                    { type: 'text', text: 'Trascrivi il testo sul foglietto. Rispondi solo con la frase finale.' },
-                                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
-                                ]
-                            }
-                        ],
-                        max_tokens: 200,
-                        temperature: 0.1
-                    })
-                });
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+        model: 'qwen/qwen3.6-27b',
+        messages: [
+            {
+                role: 'system',
+                content: 'Sei Kairós, l assistente vocale di Alessandro. Guarda l immagine e scrivi UNICA E ESCLUSIVAMENTE una frase secca e naturale in ITALIANO che descrive ciò che vedi. VIETATO usare l inglese, VIETATO inserire passaggi di ragionamento, VIETATO analizzare il codice o descrivere file come server.js. Fornisci solo la frase finale pronta per essere letta a voce.'
+            },
+            {
+                role: 'user',
+                content: [
+                    { type: 'text', text: 'Cosa c è nell immagine? Rispondi solo in italiano e solo con la frase finale.' },
+                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
+                ]
+            }
+        ],
+        max_tokens: 150,
+        temperature: 0.1
+    })
+});
 
                 if (!visionResponse.ok) {
                     const errorBody = await visionResponse.text();
