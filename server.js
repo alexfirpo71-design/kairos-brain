@@ -30,18 +30,18 @@ const server = createServer(async (req, res) => {
         messages: [
             {
                 role: 'system',
-                content: 'Sei Kairós, l assistente vocale di Alessandro. Guarda l immagine e scrivi UNICA E ESCLUSIVAMENTE una frase secca e naturale in ITALIANO che descrive ciò che vedi. VIETATO usare l inglese, VIETATO inserire passaggi di ragionamento, VIETATO analizzare il codice o descrivere file come server.js. Fornisci solo la frase finale pronta per essere letta a voce.'
+                content: 'Sei un estrattore di testo. Il tuo compito è LEGGERE E TRASCRIVERE SOLO IL TESTO PRESENTE NELL IMMAGINE. Non descrivere cosa vedi, non analizzare codice, non scrivere commenti. RESTITUISCI SOLO ED ESCLUSIVAMENTE IL TESTO SCRITTO CHE VEDI, SENZA AGGIUNGERE NESSUNA PAROLA DI CONTORNO.'
             },
             {
                 role: 'user',
                 content: [
-                    { type: 'text', text: 'Cosa c è nell immagine? Rispondi solo in italiano e solo con la frase finale.' },
+                    { type: 'text', text: 'Trascrivi solo il testo visibile in questa immagine.' },
                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                 ]
             }
         ],
-        max_tokens: 150,
-        temperature: 0.1
+        max_tokens: 200,
+        temperature: 0.0 // Impostato a zero per massima precisione e zero creatività
     })
 });
 
