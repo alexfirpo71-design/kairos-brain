@@ -35,7 +35,7 @@ const server = createServer(async (req, res) => {
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi il testo sul foglietto e descrivi cosa c è intorno. Rispondi solo con la frase finale.' },
+                                    { type: 'text', text: 'Trascrivi il testo sul foglietto. Rispondi solo con la frase finale.' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
