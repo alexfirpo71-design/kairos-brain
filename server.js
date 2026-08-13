@@ -478,7 +478,7 @@ wss.on('connection', (ws, req) => {
                             if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                             
                             // PROTEZIONE LUNGHI DISCORSI: Rinnova continuamente il timer durante la lettura
-                            sessionActiveUntil = Date.now() + 60000;
+                            sessionActiveUntil = Date.now() + 100000;
                             
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             
