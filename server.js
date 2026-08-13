@@ -312,7 +312,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'gpt-oss-20b', // Sostituito con il nuovo modello
+            model: 'openai/gpt-oss-20b', // Sostituito con il nuovo modello
             messages: messages,
             max_tokens: 300,
             temperature: 0.7
