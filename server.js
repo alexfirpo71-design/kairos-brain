@@ -4,88 +4,130 @@ import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { spawn } from 'child_process';
 
-// Mappa per gestire più dispositivi ESP32 basati sul loro MAC address
-const activeClients = new Map();
+let activeWsClient = null;
 
 const server = createServer(async (req, res) => {
-    if (req.method === 'POST' && req.url === '/upload') {
-        let buffers = [];
-        req.on('data', chunk => buffers.push(chunk));
-        req.on('end', async () => {
-            const imageBuffer = Buffer.concat(buffers);
-            try {
-                if (!imageBuffer || imageBuffer.length === 0) {
-                    res.writeHead(400, { 'Content-Type': 'text/plain' });
-                    res.end('Immagine vuota o non ricevuta.');
-                    return;
-                }
+    if (req.method === 'POST' && req.url === '/upload') {
+        let buffers = [];
+        req.on('data', chunk => buffers.push(chunk));
+        req.on('end', async () => {
+            const imageBuffer = Buffer.concat(buffers);
+            try {
+                if (!imageBuffer || imageBuffer.length === 0) {
+                    res.writeHead(400, { 'Content-Type': 'text/plain' });
+                    res.end('Immagine vuota o non ricevuta.');
+                    return;
+                }
 
-                console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, elaborazione in corso...");
-                const apiKey = process.env.GROQ_API_KEY;
-                
-                const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: 'meta-llama/llama-3.2-11b-vision-preview', // Aggiornato a un modello vision stabile su Groq
-                        messages: [
-                            {
-                                role: 'system',
-                                content: 'Sei Kairós, l assistente di Alessandro. Osserva l immagine e scrivi UNICA E ESCLUSIVAMENTE la frase di risposta finale in italiano, descrivendo il testo sul foglietto e ciò che c è intorno. NON inserire passaggi intermedi, elenchi numerati, analisi, tag di pensiero o markdown di alcun tipo. Fornisci solo il testo secco da leggere a voce.'
-                            },
-                            {
-                                role: 'user',
-                                content: [
-                                    { type: 'text', text: 'Trascrivi il testo sul foglietto. Rispondi solo con la frase finale.' },
-                                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
-                                ]
-                            }
-                        ],
-                        max_tokens: 200,
-                        temperature: 0.1
-                    })
-                });
+                console.log("[Server] Immagine ricevuta dall'ESP32 tramite POST, elaborazione in corso...");
+                const apiKey = process.env.GROQ_API_KEY;
+                
+                const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'qwen/qwen3.6-27b',
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'Sei Kairós, l assistente di Alessandro. Osserva l immagine e scrivi UNICA E ESCLUSIVAMENTE la frase di risposta finale in italiano, descrivendo il testo sul foglietto e ciò che c è intorno. NON inserire passaggi intermedi, elenchi numerati, analisi, tag di pensiero o markdown di alcun tipo. Fornisci solo il testo secco da leggere a voce.'
+                            },
+                            {
+                                role: 'user',
+                                content: [
+                                    { type: 'text', text: 'Trascrivi il testo sul foglietto. Rispondi solo con la frase finale.' },
+                                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
+                                ]
+                            }
+                        ],
+                        max_tokens: 200,
+                        temperature: 0.1
+                    })
+                });
 
-                if (!visionResponse.ok) {
-                    const errorBody = await visionResponse.text();
-                    console.error(`[Errore Dettagliato Groq] Status: ${visionResponse.status} - Body: ${errorBody}`);
-                    throw new Error(`Errore API: ${visionResponse.status}`);
-                }
-                
-                const visionData = await visionResponse.json();
-                let rawText = visionData.choices[0]?.message?.content?.trim() || "Impossibile analizzare l'immagine.";
-                
-                let resultText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+                if (!visionResponse.ok) {
+                    const errorBody = await visionResponse.text();
+                    console.error(`[Errore Dettagliato Groq] Status: ${visionResponse.status} - Body: ${errorBody}`);
+                    throw new Error(`Errore API: ${visionResponse.status}`);
+                }
+                
+                const visionData = await visionResponse.json();
+                let rawText = visionData.choices[0].message.content.trim();
+                
+                let resultText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-                if (resultText.includes("4.")) {
-                    const parts = resultText.split(/4\.\s*\*\*.*?\*\*:/i);
-                    if (parts.length > 1) {
-                        resultText = parts[1].trim().replace(/^["']|["']$/g, '');
-                    }
-                }
-                
-                console.log(`[Risposta Monitor] "${resultText}"`);
-                
-                res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end(`Immagine ricevuta ed elaborata con successo: ${resultText}`);
+                // Estrae solo la parte finale pulita se il modello include passaggi numerati o bozze
+                if (resultText.includes("4.")) {
+                    const parts = resultText.split(/4\.\s*\*\*.*?\*\*:/i);
+                    if (parts.length > 1) {
+                        resultText = parts[1].trim().replace(/^["']|["']$/g, '');
+                    }
+                }
+                // Fallamento di sicurezza alternativo se trova virgolette o sezioni di draft
+                if (resultText.includes("Draft the response")) {
+                    const match = resultText.match(/["']([^"']+)["']/g);
+                    if (match && match.length > 0) {
+                        resultText = match[match.length - 1].replace(/["']/g, '');
+                    }
+                }
+                
+                console.log(`[Risposta Monitor] "${resultText}"`);
+                
+                res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+                res.end(`Immagine ricevuta ed elaborata con successo: ${resultText}`);
 
-                // Invia l'audio al primo client attivo disponibile (o potresti passare il MAC se noto)
-                const targetClient = activeClients.values().next().value;
-                if (targetClient && targetClient.readyState === targetClient.OPEN) {
-                    console.log("[WS] Invio audio della descrizione dello scatto all'ESP32...");
-                    await streamTextToSpeech(targetClient, resultText, currentVolume);
-                }
+                if (activeWsClient && activeWsClient.readyState === activeWsClient.OPEN) {
+                    console.log("[WS] Invio audio della descrizione dello scatto all'ESP32...");
+                    activeWsClient.isSpeaking = true;
+                    activeWsClient.send(JSON.stringify({ action: 'speak', text: resultText.trim() }));
 
-            } catch (err) {
-                console.error("[Errore Upload]", err.message);
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end("Errore interno del server durante l'elaborazione dell'immagine.");
-            }
-        });
-    } else {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('Kairos Brain Server is running!\n');
-    }
+                    try {
+                        const textChunks = splitTextIntoChunks(resultText, 150);
+                        
+                        for (let chunk of textChunks) {
+                            if (activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) break;
+                            const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
+                            
+                            if (pcmPart && pcmPart.length > 0) {
+                                const chunkSize = 4096;
+                                for (let i = 0; i < pcmPart.length; i += chunkSize) {
+                                    if (activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) break;
+                                    
+                                    while (activeWsClient.bufferedAmount > 65536) {
+                                        await new Promise(resolve => setTimeout(resolve, 20));
+                                        if (activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) break;
+                                    }
+                                    
+                                    activeWsClient.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
+                                }
+                            }
+                            // Pausa per evitare il blocco di Google TTS
+                            await new Promise(resolve => setTimeout(resolve, 300));
+                        }
+
+                        if (activeWsClient.isSpeaking) {
+                            console.log("[WS] Streaming audio dello scatto completato.");
+                            if (activeWsClient.readyState === activeWsClient.OPEN) {
+                                activeWsClient.send(JSON.stringify({ action: 'stop' }));
+                            }
+                        }
+                        activeWsClient.isSpeaking = false;
+                    } catch (streamErr) {
+                        console.error("[Errore Streaming Audio Scatto]", streamErr);
+                        if (activeWsClient) activeWsClient.isSpeaking = false;
+                    }
+                }
+
+            } catch (err) {
+                console.error("[Errore Upload]", err.message);
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Errore interno del server durante l elaborazione dell immagine.');
+            }
+        });
+    } else {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('Kairos Brain Server is running!\n');
+    }
 });
 
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -94,368 +136,390 @@ const sessionHistories = new Map();
 let currentVolume = 70;
 
 function formatTimeForSpeech(text) {
-    return text.replace(/\b([0-2]?[0-9])[:\.]([0-5][0-9])\b/g, (match, hours, minutes) => {
-        const h = parseInt(hours, 10);
-        const m = parseInt(minutes, 10);
-        
-        let hourText = h === 1 ? "l'una" : `le ${h}`;
-        if (h === 0) hourText = "le ore zero";
-        
-        if (m === 0) return `${hourText} in punto`;
-        if (m < 10) return `${hourText} e zero ${m}`;
-        return `${hourText} e ${m}`;
-    });
+    return text.replace(/\b([0-2]?[0-9])[:\.]([0-5][0-9])\b/g, (match, hours, minutes) => {
+        const h = parseInt(hours, 10);
+        const m = parseInt(minutes, 10);
+        
+        let hourText = h === 1 ? "l'una" : `le ${h}`;
+        if (h === 0) hourText = "le ore zero";
+        
+        if (m === 0) return `${hourText} in punto`;
+        if (m < 10) return `${hourText} e zero ${m}`;
+        return `${hourText} e ${m}`;
+    });
 }
 
 function splitTextIntoChunks(text, maxLength = 250) {
-    if (text.length <= maxLength) return [text];
-    const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
-    let chunks = [];
-    let currentChunk = "";
+    if (text.length <= maxLength) return [text];
+    const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
+    let chunks = [];
+    let currentChunk = "";
 
-    for (let sentence of sentences) {
-        if ((currentChunk + sentence).length <= maxLength) {
-            currentChunk += sentence;
-        } else {
-            if (currentChunk) chunks.push(currentChunk.trim());
-            if (sentence.length > maxLength) {
-                let words = sentence.split(" ");
-                let subChunk = "";
-                for (let word of words) {
-                    if ((subChunk + " " + word).length <= maxLength) {
-                        subChunk += (subChunk ? " " : "") + word;
-                    } else {
-                        if (subChunk) chunks.push(subChunk.trim());
-                        subChunk = word;
-                    }
-                }
-                currentChunk = subChunk;
-            } else {
-                currentChunk = sentence;
-            }
-        }
-    }
-    if (currentChunk) chunks.push(currentChunk.trim());
-    return chunks;
+    for (let sentence of sentences) {
+        if ((currentChunk + sentence).length <= maxLength) {
+            currentChunk += sentence;
+        } else {
+            if (currentChunk) chunks.push(currentChunk.trim());
+            if (sentence.length > maxLength) {
+                let words = sentence.split(" ");
+                let subChunk = "";
+                for (let word of words) {
+                    if ((subChunk + " " + word).length <= maxLength) {
+                        subChunk += (subChunk ? " " : "") + word;
+                    } else {
+                        if (subChunk) chunks.push(subChunk.trim());
+                        subChunk = word;
+                    }
+                }
+                currentChunk = subChunk;
+            } else {
+                currentChunk = sentence;
+            }
+        }
+    }
+    if (currentChunk) chunks.push(currentChunk.trim());
+    return chunks;
 }
 
 async function getSingleTtsPcm(textChunk, volumePercent) {
-    try {
-        const timeFormatted = formatTimeForSpeech(textChunk);
-        const speechFriendlyText = timeFormatted.replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
-        const sanitizedText = speechFriendlyText.replace(/[^\w\sàèéìòùÀÈÉÌÒÙ.,?!]/g, '').trim();
+    try {
+        const timeFormatted = formatTimeForSpeech(textChunk);
 
-        const cleanText = encodeURIComponent(sanitizedText);
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
-        
-        const response = await fetch(ttsUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-        });
+        const speechFriendlyText = timeFormatted
+            .replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
 
-        if (!response.ok) throw new Error(`Errore TTS HTTP: ${response.status}`);
-        
-        const arrayBuffer = await response.arrayBuffer();
-        const mp3Buffer = Buffer.from(arrayBuffer);
-        const volumeFactor = Math.max(0.05, volumePercent / 70);
+        const sanitizedText = speechFriendlyText
+            .replace(/[^\w\sàèéìòùÀÈÉÌÒÙ.,?!]/g, '')
+            .trim();
 
-        const pcmBuffer = await new Promise((resolve, reject) => {
-            const ffmpeg = spawn('ffmpeg', [
-                '-i', 'pipe:0',
-                '-af', `volume=${volumeFactor},equalizer=f=300:width_type=o:width=2:g=2,acompressor=threshold=-20dB:ratio=2:attack=5:release=50`,
-                '-f', 's16le',
-                '-acodec', 'pcm_s16le',
-                '-ac', '1',
-                '-ar', '16000',
-                'pipe:1'
-            ]);
+        const cleanText = encodeURIComponent(sanitizedText);
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
+        
+        const response = await fetch(ttsUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
 
-            let chunks = [];
-            ffmpeg.stdout.on('data', chunk => chunks.push(chunk));
-            ffmpeg.on('close', code => {
-                if (code === 0) resolve(Buffer.concat(chunks));
-                else reject(new Error(`FFmpeg exited with code ${code}`));
-            });
-            ffmpeg.on('error', err => reject(err));
+        if (!response.ok) {
+            console.error(`[Errore TTS] Status ${response.status} per: "${sanitizedText}"`);
+            throw new Error(`Errore TTS HTTP: ${response.status}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        const mp3Buffer = Buffer.from(arrayBuffer);
 
-            ffmpeg.stdin.write(mp3Buffer);
-            ffmpeg.stdin.end();
-        });
+        const volumeFactor = Math.max(0.05, volumePercent / 70);
 
-        const silenceSamples = 4000; 
-        let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
+        const pcmBuffer = await new Promise((resolve, reject) => {
+            const ffmpeg = spawn('ffmpeg', [
+                '-i', 'pipe:0',
+                '-af', `volume=${volumeFactor},equalizer=f=300:width_type=o:width=2:g=2,acompressor=threshold=-20dB:ratio=2:attack=5:release=50`,
+                '-f', 's16le',
+                '-acodec', 'pcm_s16le',
+                '-ac', '1',
+                '-ar', '16000',
+                'pipe:1'
+            ]);
 
-        // Fade in / fade out
-        const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
-        for (let i = 0; i < fadeSamplesIn; i++) {
-            const sample = paddedPcmBuffer.readInt16LE(i * 2);
-            const multiplier = i / fadeSamplesIn;
-            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
-        }
+            let chunks = [];
+            ffmpeg.stdout.on('data', chunk => chunks.push(chunk));
+            ffmpeg.on('close', code => {
+                if (code === 0) resolve(Buffer.concat(chunks));
+                else reject(new Error(`FFmpeg exited with code ${code}`));
+            });
+            ffmpeg.on('error', err => reject(err));
 
-        const fadeSamplesOut = silenceSamples;
-        const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
-        for (let i = 0; i < fadeSamplesOut; i++) {
-            const idx = (startOutIdx + i) * 2;
-            const sample = paddedPcmBuffer.readInt16LE(idx);
-            const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
-            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
-        }
+            ffmpeg.stdin.write(mp3Buffer);
+            ffmpeg.stdin.end();
+        });
 
-        return paddedPcmBuffer;
-    } else (err) { // Corretto blocco catch
-        console.error("[Errore TTS Singolo]", err.message);
-        return null;
-    }
-}
+        const silenceSamples = 4000; 
+        let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
 
-// Funzione unificata per evitare la duplicazione del codice di streaming TTS
-async function streamTextToSpeech(ws, text, volume) {
-    ws.isSpeaking = true;
-    ws.send(JSON.stringify({ action: 'speak', text: text.trim() }));
+        const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
+        for (let i = 0; i < fadeSamplesIn; i++) {
+            const sample = paddedPcmBuffer.readInt16LE(i * 2);
+            const multiplier = i / fadeSamplesIn;
+            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
+        }
 
-    try {
-        const textChunks = splitTextIntoChunks(text, 150);
-        
-        for (let chunk of textChunks) {
-            if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-            const pcmPart = await getSingleTtsPcm(chunk, volume);
-            
-            if (pcmPart && pcmPart.length > 0) {
-                const chunkSize = 4096;
-                for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                    if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                    
-                    while (ws.bufferedAmount > 65536) {
-                        await new Promise(resolve => setTimeout(resolve, 20));
-                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-                    }
-                    
-                    ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
-                }
-            }
-            await new Promise(resolve => setTimeout(resolve, 300));
-        }
+        const fadeSamplesOut = silenceSamples;
+        const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
+        for (let i = 0; i < fadeSamplesOut; i++) {
+            const idx = (startOutIdx + i) * 2;
+            const sample = paddedPcmBuffer.readInt16LE(idx);
+            const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
+            paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
+        }
 
-        if (ws.isSpeaking && ws.readyState === ws.OPEN) {
-            console.log("[WS] Streaming audio completato.");
-            ws.send(JSON.stringify({ action: 'stop' }));
-        }
-    } catch (streamErr) {
-        console.error("[Errore Streaming Audio]", streamErr);
-    } finally {
-        ws.isSpeaking = false;
-    }
+        return paddedPcmBuffer;
+    } catch (err) {
+        console.error("[Errore TTS Singolo]", err.message);
+        return null;
+    }
 }
 
 async function transcribeAudio(audioBuffer) {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY mancante.");
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error("GROQ_API_KEY mancante.");
 
-    const dataLength = audioBuffer.length;
-    const fileLength = dataLength + 36;
-    const header = Buffer.from([
-        0x52, 0x49, 0x46, 0x46,
-        fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
-        0x57, 0x41, 0x56, 0x45,
-        0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,         
-        1, 0,                
-        1, 0,                
-        16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
-        32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,                
-        16, 0,               
-        0x64, 0x61, 0x74, 0x61,
-        dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
-    ]);
-    const wavBuffer = Buffer.concat([header, audioBuffer]);
+    const dataLength = audioBuffer.length;
+    const fileLength = dataLength + 36;
+    const header = Buffer.from([
+        0x52, 0x49, 0x46, 0x46,
+        fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
+        0x57, 0x41, 0x56, 0x45,
+        0x66, 0x6d, 0x74, 0x20,
+        16, 0, 0, 0,         
+        1, 0,               
+        1, 0,               
+        16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
+        32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
+        2, 0,               
+        16, 0,              
+        0x64, 0x61, 0x74, 0x61,
+        dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
+    ]);
+    const wavBuffer = Buffer.concat([header, audioBuffer]);
 
-    const formData = new FormData();
-    formData.append('file', wavBuffer, { filename: 'audio.wav', contentType: 'audio/wav' });
-    formData.append('model', 'whisper-large-v3');
-    formData.append('language', 'it');
+    const formData = new FormData();
+    formData.append('file', wavBuffer, { filename: 'audio.wav', contentType: 'audio/wav' });
+    formData.append('model', 'whisper-large-v3');
+    formData.append('language', 'it');
 
-    const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, ...formData.getHeaders() },
-        body: formData
-    });
+    const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, ...formData.getHeaders() },
+        body: formData
+    });
 
-    if (!response.ok) throw new Error(`Errore Whisper: ${response.status}`);
-    const data = await response.json();
-    return data.text;
+    if (!response.ok) throw new Error(`Errore Whisper: ${response.status}`);
+    const data = await response.json();
+    return data.text;
 }
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
-    const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
+    const apiKey = process.env.GROQ_API_KEY;
+    const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini e solo quando viene richiesto.
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua spontanea volontà):
 - L'utente ha 55 anni e si chiama Alessandro, è un perito elettronico a Genova.
 - Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
 - Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
 
-    const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
+    const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: 'llama-3.1-8b-instant',
-            messages: messages,
-            max_tokens: 300,
-            temperature: 0.7
-        })
-    });
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: 'llama-3.1-8b-instant',
+            messages: messages,
+            max_tokens: 300,
+            temperature: 0.7
+        })
+    });
 
-    if (!response.ok) {
-        if (response.status === 429) {
-            throw new Error("Troppe richieste in corso. Attendi qualche secondo.");
-        }
-        throw new Error(`Errore Chat: ${response.status}`);
-    }
-    const data = await response.json();
-    return data.choices[0].message.content;
+    if (!response.ok) {
+        if (response.status === 429) {
+            throw new Error("Troppe richieste in corso. Attendi qualche secondo.");
+        }
+        throw new Error(`Errore Chat: ${response.status}`);
+    }
+    const data = await response.json();
+    return data.choices[0].message.content;
 }
 
 wss.on('connection', (ws, req) => {
-    console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
-    ws.userName = "Alessandro";
-    ws.conversationHistory = [];
-    ws.isSpeaking = false;
-    let audioBuffer = [];
+    console.log(`[WS] Connesso da: ${req.socket.remoteAddress}`);
+    activeWsClient = ws;
+    ws.userName = "Alessandro";
+    ws.conversationHistory = [];
+    ws.isSpeaking = false;
+    let audioBuffer = [];
 
-    let sessionActiveUntil = 0;
-    const SESSION_DURATION_MS = 20000;
+    let sessionActiveUntil = 0;
+    const SESSION_DURATION_MS = 20000;
 
-    ws.isAlive = true;
-    ws.on('pong', () => { ws.isAlive = true; });
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
 
-    const pingInterval = setInterval(() => {
-        if (ws.isAlive === false) {
-            clearInterval(pingInterval);
-            return ws.terminate();
-        }
-        ws.isAlive = false;
-        ws.ping();
-    }, 30000);
+    const pingInterval = setInterval(() => {
+        if (ws.isAlive === false) {
+            clearInterval(pingInterval);
+            return ws.terminate();
+        }
+        ws.isAlive = false;
+        ws.ping();
+    }, 30000);
 
-    ws.on('message', async (message, isBinary) => {
-        if (isBinary) {
-            if (ws.isSpeaking) return;
-            audioBuffer.push(message);
-        } else {
-            try {
-                const data = JSON.parse(message.toString());
-                
-                if (data.action === 'stop') {
-                    console.log("[WS] Comando di stop ricevuto dall'ESP32.");
-                    ws.isSpeaking = false;
-                    audioBuffer = [];
-                    return;
-                }
+    ws.on('message', async (message, isBinary) => {
+        if (isBinary) {
+            if (ws.isSpeaking) return;
+            audioBuffer.push(message);
+        } else {
+            try {
+                const data = JSON.parse(message.toString());
+                
+                if (data.action === 'stop') {
+                    console.log("[WS] Comando di stop ricevuto dall'ESP32.");
+                    ws.isSpeaking = false;
+                    audioBuffer = [];
+                    return;
+                }
 
-                if (data.user) ws.userName = data.user;
+                if (data.user) ws.userName = data.user;
 
-                if (data.mac) {
-                    ws.mac = data.mac;
-                    activeClients.set(data.mac, ws); // Registra il client associato al MAC
-                    if (!sessionHistories.has(data.mac)) {
-                        sessionHistories.set(data.mac, []);
-                    }
-                    ws.conversationHistory = sessionHistories.get(data.mac);
-                }
+                if (data.mac) {
+                    ws.mac = data.mac;
+                    if (!sessionHistories.has(data.mac)) {
+                        sessionHistories.set(data.mac, []);
+                    }
+                    ws.conversationHistory = sessionHistories.get(data.mac);
+                }
 
-                if (data.mac || data.device || data.user || data.location || data.status) {
-                    return;
-                }
+                if (data.mac || data.device || data.user || data.location || data.status) {
+                    return;
+                }
 
-                if (data.state === 'processing') {
-                    const completeAudioBuffer = Buffer.concat(audioBuffer);
-                    audioBuffer = [];
+                if (data.state === 'processing') {
+                    const completeAudioBuffer = Buffer.concat(audioBuffer);
+                    audioBuffer = [];
 
-                    let replyText = null; 
-                    try {
-                        const transcript = await transcribeAudio(completeAudioBuffer);
-                        console.log(`[Whisper] Trascritto: "${transcript}"`);
-                        
-                        if (transcript && transcript.trim().length > 0) {
-                            const rawText = transcript.toLowerCase().replace(/[.,\/$%\^&\*;:{}=\-_`~()?]/g, "").trim();
-                            const now = Date.now();
-                            const isSessionActive = now < sessionActiveUntil;
-                            const hasWakeWord = rawText.includes('kairos') || rawText.includes('cairos') || rawText.includes('cairo') || rawText.includes('ehi');
+                    let replyText = null; 
+                    try {
+                        const transcript = await transcribeAudio(completeAudioBuffer);
+                        console.log(`[Whisper] Trascritto: "${transcript}"`);
+                        
+                        if (transcript && transcript.trim().length > 0) {
+                            const rawText = transcript.toLowerCase().replace(/[.,\/$%\^&\*;:{}=\-_`~()?]/g, "").trim();
+                            const now = Date.now();
 
-                            if (!isSessionActive && !hasWakeWord) {
-                                console.log(`[Ignorato] Rumore di fondo o parlato estraneo: "${transcript}"`);
-                                return; 
-                            }
+                            const isSessionActive = now < sessionActiveUntil;
 
-                            sessionActiveUntil = now + SESSION_DURATION_MS;
+                            const hasWakeWord = rawText.includes('kairos') || rawText.includes('cairos') || rawText.includes('cairo') || rawText.includes('ehi');
 
-                            if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
-                                ws.isSpeaking = false;
-                                ws.send(JSON.stringify({ action: 'stop' }));
-                                console.log("[Comando] Interruzione eseguita.");
-                                sessionActiveUntil = 0; 
-                                return;
-                            }
+                            if (!isSessionActive && !hasWakeWord) {
+                                console.log(`[Ignorato] Rumore di fondo o parlato estraneo: "${transcript}"`);
+                                return; 
+                            }
 
-                            if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('volume su')) {
-                                currentVolume = Math.min(100, currentVolume + 15);
-                                replyText = `Volume al ${currentVolume} per cento.`;
-                            } else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('volume giu')) {
-                                currentVolume = Math.max(10, currentVolume - 15);
-                                replyText = `Volume al ${currentVolume} per cento.`;
-                            } else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
-                                console.log("[WS] Intenzione telecamera rilevata. Invio comando di scatto all'ESP32...");
-                                ws.send(JSON.stringify({ action: 'trigger_camera', text: 'Scatto la foto...' }));
-                                replyText = "Un attimo, guardo subito.";
-                            } else {
-                                const isOnlyWakeWord = rawText === 'kairos' || rawText === 'ehi kairos' || rawText === 'cairos' || rawText === 'ehi cairos' || rawText === 'ehi' || rawText === 'cairo' || rawText.length < 5;
+                            sessionActiveUntil = now + SESSION_DURATION_MS;
 
-                                if (isOnlyWakeWord && !isSessionActive) {
-                                    replyText = "Dimmi pure, Alessandro.";
-                                } else {
-                                    ws.conversationHistory.push({ role: 'user', content: transcript });
-                                    replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
-                                    if (ws.conversationHistory.length > 10) {
-                                        ws.conversationHistory = ws.conversationHistory.slice(-10);
-                                    }
-                                }
-                            }
+                            if (rawText.includes('stop') || rawText.includes('fermati') || rawText.includes('basta') || rawText.includes('silenzio')) {
+                                ws.isSpeaking = false;
+                                ws.send(JSON.stringify({ action: 'stop' }));
+                                console.log("[Comando] Interruzione eseguita.");
+                                sessionActiveUntil = 0; 
+                                return;
+                            }
 
-                            ws.conversationHistory.push({ role: 'user', content: transcript });
-                            ws.conversationHistory.push({ role: 'assistant', content: replyText });
-                            console.log(`[Elaborato] Risposta: "${replyText}" | Volume: ${currentVolume}%`);
-                        }
-                    } catch (err) {
-                        console.error("[Errore IA]", err);
-                        replyText = "Si è verificato un errore di elaborazione.";
-                    }
+                            if (rawText.includes('alza') || rawText.includes('piu alto') || rawText.includes('volume su')) {
+                                currentVolume = Math.min(100, currentVolume + 15);
+                                replyText = `Volume al ${currentVolume} per cento.`;
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                            } 
+                            else if (rawText.includes('abbassa') || rawText.includes('piu basso') || rawText.includes('volume giu')) {
+                                currentVolume = Math.max(10, currentVolume - 15);
+                                replyText = `Volume al ${currentVolume} per cento.`;
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                            } 
+                            else if (rawText.includes('telecamera') || rawText.includes('guarda') || rawText.includes('inquadra') || rawText.includes('biglietto')) {
+                                console.log("[WS] Intenzione telecamera rilevata. Invio comando di scatto all'ESP32...");
+                                
+                                ws.send(JSON.stringify({ action: 'trigger_camera', text: 'Scatto la foto...' }));
 
-                    if (!replyText) return;
+                                replyText = "Un attimo, guardo subito.";
+                                ws.conversationHistory.push({ role: 'user', content: transcript });
+                                ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                            }
+                            else {
+                                const isOnlyWakeWord = rawText === 'kairos' || rawText === 'ehi kairos' || rawText === 'cairos' || rawText === 'ehi cairos' || rawText === 'ehi' || rawText === 'cairo' || rawText.length < 5;
 
-                    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
-                    await streamTextToSpeech(ws, replyText, currentVolume);
-                    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
-                }
-            } catch (e) {
-                console.log('[WS Testo]', message.toString());
-            }
-        }
-    });
+                                if (isOnlyWakeWord && !isSessionActive) {
+                                    replyText = "Dimmi pure, Alessandro.";
+                                    ws.conversationHistory.push({ role: 'user', content: transcript });
+                                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
+                                } else {
+                                    ws.conversationHistory.push({ role: 'user', content: transcript });
+                                    replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                                    ws.conversationHistory.push({ role: 'assistant', content: replyText });
 
-    ws.on('close', () => {
-        clearInterval(pingInterval);
-        ws.isSpeaking = false;
-        if (ws.mac) {
-            activeClients.delete(ws.mac);
-        }
-        console.log("[WS] Connessione chiusa.");
-    });
+                                    if (ws.conversationHistory.length > 10) {
+                                        ws.conversationHistory = ws.conversationHistory.slice(-10);
+                                    }
+                                }
+                            }
+
+                            console.log(`[Elaborato] Risposta: "${replyText}" | Volume: ${currentVolume}%`);
+                        }
+                    } catch (err) {
+                        console.error("[Errore IA]", err);
+                        replyText = "Si è verificato un errore di elaborazione.";
+                    }
+
+                    if (!replyText) return;
+
+                    ws.isSpeaking = true;
+                    ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
+
+                    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
+
+                    try {
+                        const textChunks = splitTextIntoChunks(replyText, 150);
+                        
+                        for (let chunk of textChunks) {
+                            if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                            const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
+                            
+                            if (pcmPart && pcmPart.length > 0) {
+                                const chunkSize = 4096;
+                                for (let i = 0; i < pcmPart.length; i += chunkSize) {
+                                    if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                                    
+                                    while (ws.bufferedAmount > 65536) {
+                                        await new Promise(resolve => setTimeout(resolve, 20));
+                                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                                    }
+                                    
+                                    ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
+                                }
+                            }
+                            // Pausa per evitare il blocco di Google TTS
+                            await new Promise(resolve => setTimeout(resolve, 300));
+                        }
+
+                        if (ws.isSpeaking) {
+                            console.log("[WS] Streaming audio completato.");
+                            if (ws.readyState === ws.OPEN) {
+                                ws.send(JSON.stringify({ action: 'stop' }));
+                            }
+                        }
+                        ws.isSpeaking = false;
+                        
+                        sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
+
+                    } catch (streamErr) {
+                        console.error("[Errore Streaming Audio]", streamErr);
+                        ws.isSpeaking = false;
+                    }
+                }
+            } catch (e) {
+                console.log('[WS Testo]', message.toString());
+            }
+        }
+    });
+
+    ws.on('close', () => {
+        clearInterval(pingInterval);
+        ws.isSpeaking = false;
+        if (activeWsClient === ws) activeWsClient = null;
+        console.log("[WS] Connessione chiusa.");
+    });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Server Kairós in ascolto sulla porta ${PORT}`);
+    console.log(`Server Kairós in ascolto sulla porta ${PORT}`);
 });
