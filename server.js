@@ -318,7 +318,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'openai/gpt-oss-20b',
+            model: 'llama-3.3-70b-versatile',
             messages: messages,
             max_tokens: 4000,
             temperature: 0.7
@@ -474,7 +474,7 @@ wss.on('connection', (ws, req) => {
                     ws.isSpeaking = true;
                     ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
 
-                    sessionActiveUntil = Date.now() + 600000; // Esteso a 10 minuti di sicurezza durante i discorsi lunghi
+                    sessionActiveUntil = Date.now() + 600000;
 
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 150);
