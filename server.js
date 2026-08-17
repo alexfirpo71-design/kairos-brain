@@ -23,27 +23,27 @@ const server = createServer(async (req, res) => {
                 const apiKey = process.env.GROQ_API_KEY;
                 
                 const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-        model: 'qwen/qwen3.6-27b',
-        messages: [
-            {
-                role: 'system',
-                content: 'Sei un estrattore di testo. Il tuo compito è LEGGERE E TRASCRIVERE SOLO IL TESTO PRESENTE NELL IMMAGINE. Non descrivere cosa vedi, non analizzare codice, non scrivere commenti. RESTITUISCI SOLO ED ESCLUSIVAMENTE IL TESTO SCRITTO CHE VEDI, SENZA AGGIUNGERE NESSUNA PAROLA DI CONTORNO.'
-            },
-            {
-                role: 'user',
-                content: [
-                    { type: 'text', text: 'Trascrivi solo il testo visibile in questa immagine.' },
-                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
-                ]
-            }
-        ],
-        max_tokens: 200,
-        temperature: 0.0 
-    })
-});
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'qwen/qwen3.6-27b',
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'Sei un estrattore di testo. Il tuo compito è LEGGERE E TRASCRIVERE SOLO IL TESTO PRESENTE NELL IMMAGINE. Non descrivere cosa vedi, non analizzare codice, non scrivere commenti. RESTITUISCI SOLO ED ESCLUSIVAMENTE IL TESTO SCRITTO CHE VEDI, SENZA AGGIUNGERE NESSUNA PAROLA DI CONTORNO.'
+                            },
+                            {
+                                role: 'user',
+                                content: [
+                                    { type: 'text', text: 'Trascrivi solo il testo visibile in questa immagine.' },
+                                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
+                                ]
+                            }
+                        ],
+                        max_tokens: 200,
+                        temperature: 0.0 
+                    })
+                });
 
                 if (!visionResponse.ok) {
                     const errorBody = await visionResponse.text();
@@ -186,7 +186,7 @@ async function getSingleTtsPcm(textChunk, volumePercent) {
             .replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
 
         const sanitizedText = speechFriendlyText
-            .replace(/[*#_`~[\]()>]/g, '') // Rimosso Markdown critico per il TTS
+            .replace(/[*#_`~[\]()>]/g, '')
             .replace(/[^\w\sàèéìòùÀÈÉÌÒÙ.,?!]/g, '')
             .trim();
 
@@ -299,6 +299,14 @@ async function getGroqChatResponse(conversationHistory, userName = "Alessandro")
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini e solo quando viene richiesto.
+
+ISTRUZIONE CRITICA SULLA MEMORIA LOCALE:
+Quando l'utente ti chiede esplicitamente di memorizzare, ricordare o salvare un fatto, un'informazione o una preferenza (es. "memorizza che...", "ricordati che..."):
+- NON rifiutarti mai e non dire che non puoi farlo.
+- DEVI iniziare la tua risposta tassativamente con la stringa esatta "MEMORIZZA: " seguita dall'informazione da ricordare in modo sintetico.
+Esempio corretto: "MEMORIZZA: L'età di Tiziana è 50 anni."
+Se non ti viene chiesto di memorizzare nulla, rispondi normalmente senza usare quel prefisso.
+
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua spontanea volontà):
 - L'utente ha 55 anni e si chiama Alessandro, è un perito elettronico a Genova.
 - Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
@@ -312,7 +320,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
         body: JSON.stringify({
             model: 'openai/gpt-oss-20b',
             messages: messages,
-            max_tokens: 4000, // Aumentato a 4000 per evitare interruzioni sui racconti
+            max_tokens: 4000,
             temperature: 0.7
         })
     });
@@ -466,7 +474,7 @@ wss.on('connection', (ws, req) => {
                     ws.isSpeaking = true;
                     ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
 
-                    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
+                    sessionActiveUntil = Date.now() + 600000; // Esteso a 10 minuti di sicurezza durante i discorsi lunghi
 
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 150);
@@ -474,7 +482,7 @@ wss.on('connection', (ws, req) => {
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                             
-                            sessionActiveUntil = Date.now() + 500000;
+                            sessionActiveUntil = Date.now() + 600000;
                             
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
                             
