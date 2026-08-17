@@ -312,7 +312,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
         body: JSON.stringify({
             model: 'openai/gpt-oss-20b',
             messages: messages,
-            max_tokens: 2000, // Aumentato a 800 per evitare interruzioni sui racconti
+            max_tokens: 8000, // Aumentato a 800 per evitare interruzioni sui racconti
             temperature: 0.7
         })
     });
