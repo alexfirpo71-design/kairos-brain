@@ -41,7 +41,7 @@ const server = createServer(async (req, res) => {
             }
         ],
         max_tokens: 200,
-        temperature: 0.0 // Impostato a zero per massima precisione e zero creatività
+        temperature: 0.0 
     })
 });
 
@@ -56,14 +56,12 @@ const server = createServer(async (req, res) => {
                 
                 let resultText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-                // Estrae solo la parte finale pulita se il modello include passaggi numerati o bozze
                 if (resultText.includes("4.")) {
                     const parts = resultText.split(/4\.\s*\*\*.*?\*\*:/i);
                     if (parts.length > 1) {
                         resultText = parts[1].trim().replace(/^["']|["']$/g, '');
                     }
                 }
-                // Fallamento di sicurezza alternativo se trova virgolette o sezioni di draft
                 if (resultText.includes("Draft the response")) {
                     const match = resultText.match(/["']([^"']+)["']/g);
                     if (match && match.length > 0) {
@@ -101,7 +99,6 @@ const server = createServer(async (req, res) => {
                                     activeWsClient.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                                 }
                             }
-                            // Pausa per evitare il blocco di Google TTS
                             await new Promise(resolve => setTimeout(resolve, 300));
                         }
 
@@ -189,6 +186,7 @@ async function getSingleTtsPcm(textChunk, volumePercent) {
             .replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
 
         const sanitizedText = speechFriendlyText
+            .replace(/[*#_`~[\]()>]/g, '') // Rimosso Markdown critico per il TTS
             .replace(/[^\w\sàèéìòùÀÈÉÌÒÙ.,?!]/g, '')
             .trim();
 
@@ -270,12 +268,12 @@ async function transcribeAudio(audioBuffer) {
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
         16, 0, 0, 0,         
-        1, 0,                
-        1, 0,                
+        1, 0,               
+        1, 0,               
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,                
-        16, 0,               
+        2, 0,               
+        16, 0,              
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -312,9 +310,9 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'openai/gpt-oss-20b', // Sostituito con il nuovo modello
+            model: 'openai/gpt-oss-20b',
             messages: messages,
-            max_tokens: 300,
+            max_tokens: 800, // Aumentato a 800 per evitare interruzioni sui racconti
             temperature: 0.7
         })
     });
@@ -367,7 +365,6 @@ wss.on('connection', (ws, req) => {
                     return;
                 }
 
-                // PROTEZIONE: Se sta già parlando, ignora qualsiasi altro input o stato per evitare tagli a metà
                 if (ws.isSpeaking) {
                     return;
                 }
@@ -477,7 +474,6 @@ wss.on('connection', (ws, req) => {
                         for (let chunk of textChunks) {
                             if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
                             
-                            // PROTEZIONE LUNGHI DISCORSI: Rinnova continuamente il timer durante la lettura
                             sessionActiveUntil = Date.now() + 500000;
                             
                             const pcmPart = await getSingleTtsPcm(chunk, currentVolume);
@@ -495,7 +491,6 @@ wss.on('connection', (ws, req) => {
                                     ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                                 }
                             }
-                            // Pausa per evitare il blocco di Google TTS
                             await new Promise(resolve => setTimeout(resolve, 300));
                         }
 
