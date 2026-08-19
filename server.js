@@ -1,4 +1,4 @@
-import http, { createServer } from 'http';
+    import http, { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// AGGIUNTA: File JSON per la persistenza dei dati memorizzati (comandi MEMORIZZA:)
+// File JSON per la persistenza dei dati memorizzati (comandi MEMORIZZA:)
 const MEMORY_FILE = path.join(__dirname, 'kairos_memory.json');
 
 function loadPersistedMemory() {
@@ -36,7 +36,7 @@ function savePersistedMemory(memoryList) {
 // Inizializzazione della memoria persistente
 let persistentMemory = loadPersistedMemory();
 
-// AGGIUNTA: Mappa per gestire i client connessi basata sul MAC address
+// Mappa per gestire i client connessi basata sul MAC address
 const activeClients = new Map();
 let activeWsClient = null;
 
@@ -65,17 +65,17 @@ const server = createServer(async (req, res) => {
                         messages: [
                             {
                                 role: 'system',
-                                content: 'Sei un estrattore di testo. Il tuo compito è LEGGERE E TRASCRIVERE SOLO IL TESTO PRESENTE NELL IMMAGINE. Non descrivere cosa vedi, non analizzare codice, non scrivere commenti. RESTITUISCI SOLO ED ESCLUSIVAMENTE IL TESTO SCRITTO CHE VEDI, SENZA AGGIUNGERE NESSUNA PAROLA DI CONTORNO.'
+                                content: 'Sei un lettore ottico di testo in italiano. Leggi SOLO il testo in primo piano nell immagine e restituiscilo in una singola frase fluida in italiano. NON usare elenchi puntati, NON usare markdown, NON tradurre in inglese, NON inserire tag di pensiero o commenti. Solo il testo letto.'
                             },
                             {
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: 'Trascrivi solo il testo visibile in questa immagine.' },
+                                    { type: 'text', text: 'Leggi il testo di questa immagine in italiano:' },
                                     { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` } }
                                 ]
                             }
                         ],
-                        max_tokens: 200,
+                        max_tokens: 100,
                         temperature: 0.0 
                     })
                 });
@@ -89,27 +89,19 @@ const server = createServer(async (req, res) => {
                 const visionData = await visionResponse.json();
                 let rawText = visionData.choices[0].message.content.trim();
                 
-                let resultText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-                if (resultText.includes("4.")) {
-                    const parts = resultText.split(/4\.\s*\*\*.*?\*\*:/i);
-                    if (parts.length > 1) {
-                        resultText = parts[1].trim().replace(/^["']|["']$/g, '');
-                    }
-                }
-                if (resultText.includes("Draft the response")) {
-                    const match = resultText.match(/["']([^"']+)["']/g);
-                    if (match && match.length > 0) {
-                        resultText = match[match.length - 1].replace(/["']/g, '');
-                    }
-                }
+                // Pulizia forte di eventuali residui di markdown, elenchi o tag think
+                let resultText = rawText
+                    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                    .replace(/[\*\#\_\[\]\(\)]/g, '')
+                    .replace(/\n+/g, ' ')
+                    .trim();
                 
-                console.log(`[Risposta Monitor] "${resultText}"`);
+                console.log(`[Risposta Monitor Pulita] "${resultText}"`);
                 
                 res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
                 res.end(`Immagine ricevuta ed elaborata con successo: ${resultText}`);
 
-                // Seleziona il client target basandosi sul MAC (header o mappa) o sul fallback
+                // Seleziona il client target basandosi sul MAC o sul fallback
                 let targetWs = null;
                 if (clientMac && activeClients.has(clientMac)) {
                     targetWs = activeClients.get(clientMac);
@@ -312,13 +304,13 @@ async function transcribeAudio(audioBuffer) {
         fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
         0x57, 0x41, 0x56, 0x45,
         0x66, 0x6d, 0x74, 0x20,
-        16, 0, 0, 0,          
-        1, 0,                 
-        1, 0,                 
+        16, 0, 0, 0,         
+        1, 0,                
+        1, 0,                
         16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
         32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-        2, 0,                 
-        16, 0,                
+        2, 0,                
+        16, 0,               
         0x64, 0x61, 0x74, 0x61,
         dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
     ]);
@@ -343,7 +335,6 @@ async function transcribeAudio(audioBuffer) {
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
     
-    // Includiamo anche la memoria persistente caricata all'avvio nel system prompt per dare continuità
     const memoryContextText = persistentMemory.length > 0 
         ? "\nMEMORIA PERSISTENTE ATTUALE:\n" + persistentMemory.map(m => `- ${m.content}`).join('\n') 
         : "";
@@ -417,7 +408,6 @@ wss.on('connection', (ws, req) => {
             audioBuffer.push(message);
         } else {
             try {
-                // Gestione messaggi strutturati JSON o handshake iniziale
                 let data;
                 try {
                     data = JSON.parse(message.toString());
@@ -425,7 +415,6 @@ wss.on('connection', (ws, req) => {
                     data = null;
                 }
 
-                // Gestione handshake MAC address
                 if (data && data.type === 'handshake' && data.mac) {
                     ws.deviceMac = data.mac;
                     activeClients.set(ws.deviceMac, ws);
@@ -514,7 +503,7 @@ wss.on('connection', (ws, req) => {
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             }
                             else {
-                                const isOnlyWakeWord = rawText === 'kairos' || rawText === 'ehi kairos' || rawText === 'cairos' || rawText === 'ehi cairos' || rawText === 'ehi' || rawText === 'cairo' || rawText.length < 5;
+                                const isOnlyWakeWord = rawText === 'kairos' || rawText === 'ehi kairos' || rawText === 'cairos' || rawText === 'ehi cairos' || rawText === 'ehi' || rawText.length < 5;
 
                                 if (isOnlyWakeWord && !isSessionActive) {
                                     replyText = "Dimmi pure, Alessandro.";
@@ -524,7 +513,6 @@ wss.on('connection', (ws, req) => {
                                     ws.conversationHistory.push({ role: 'user', content: transcript });
                                     replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
                                     
-                                    // AGGIUNTA: Intercettazione e persistenza dei comandi MEMORIZZA:
                                     if (replyText.startsWith('MEMORIZZA:')) {
                                         const memoryContent = replyText.replace('MEMORIZZA:', '').trim();
                                         persistentMemory.push({ content: memoryContent, timestamp: new Date().toISOString() });
@@ -552,7 +540,7 @@ wss.on('connection', (ws, req) => {
                     ws.isSpeaking = true;
                     ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
 
-                    sessionActiveUntil = Date.now() + 600000; // Esteso a 10 minuti di sicurezza durante i discorsi lunghi
+                    sessionActiveUntil = Date.now() + 600000;
 
                     try {
                         const textChunks = splitTextIntoChunks(replyText, 150);
