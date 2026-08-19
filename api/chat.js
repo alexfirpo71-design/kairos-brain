@@ -19,7 +19,7 @@ export default async function handler(req, res) {
 
         // Prompt di sistema coerente con l'identità di Kairós e il profilo utente
         const systemInstruction = `Sei Kairós, l'assistente IA avanzato di Alessandro. 
-Parli sempre in italiano in modo diretto, esaustivo ma senza eccessive lungaggini. 
+Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini. 
 Ricordi i messaggi precedenti e il profilo dell'utente (perito elettronico, appassionato di retrogaming, flight simulation e cucina tecnica).`;
 
         // Configurazione della sessione di chat con la cronologia e l'istruzione di sistema
@@ -28,7 +28,7 @@ Ricordi i messaggi precedenti e il profilo dell'utente (perito elettronico, appa
             config: {
                 systemInstruction: systemInstruction,
                 temperature: 0.7,
-                maxOutputTokens: 300,
+                maxOutputTokens: 4000,
             },
             history: history.map(h => ({
                 role: h.role, // 'user' o 'model'
