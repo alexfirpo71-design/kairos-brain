@@ -3,12 +3,26 @@ import { WebSocketServer } from 'ws';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Definizione __dirname per ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // =============================================
 // --- GLOBAL STATE ---
 // =============================================
 let activeWsClient = null;
 const sessionHistories = new Map();
+
+// Percorso per il file immagine temporaneo (sovrascrittura fissa)
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+const FIXED_IMAGE_PATH = path.join(UPLOAD_DIR, 'ticket.jpg');
 
 // =============================================
 // --- HTTP SERVER SETUP ---
@@ -66,6 +80,10 @@ async function handleImageUpload(req, res) {
             }
 
             console.log(`[📸 OCR] Immagine ricevuta (${(imageBuffer.length / 1024).toFixed(2)} KB)`);
+
+            // --- SOVRASCRITTURA FISSA SUL SERVER ---
+            fs.writeFileSync(FIXED_IMAGE_PATH, imageBuffer);
+            console.log(`[💾 File System] Immagine salvata (sovrascritta) in: ${FIXED_IMAGE_PATH}`);
 
             const apiKey = process.env.GROQ_API_KEY;
             if (!apiKey) {
@@ -330,7 +348,7 @@ wss.on('connection', (ws, req) => {
                         }
                         else {
                             // Chat IA normale
-                            const isOnlyWakeWord = /^(kairos|ehi kairos|cairos|ehi cairos|ehi|cairo)$/.test(rawText)
+                            const isOnlyWakeWord = /^(kairos|ehi kairos|cairos|ehi kairos|ehi|cairo)$/.test(rawText)
                                 || rawText.length < 5;
 
                             if (isOnlyWakeWord && !isSessionActive) {
@@ -656,8 +674,8 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`\n╔════════════════════════════════════╗`);
-    console.log(`║  🚀 Kairós Brain Server           ║`);
-    console.log(`║  Port: ${PORT}                          ║`);
-    console.log(`║  Status: ACTIVE                   ║`);
+    console.log(`║  🚀 Kairós Brain Server            ║`);
+    console.log(`║  Port: ${PORT}                        ║`);
+    console.log(`║  Status: ACTIVE                    ║`);
     console.log(`╚════════════════════════════════════╝\n`);
 });
