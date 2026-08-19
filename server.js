@@ -613,12 +613,20 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Kairós, assistente IA di ${userName}.
-Parli in italiano in modo naturale, diretto e conciso.
+    const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
+Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini e solo quando viene richiesto.
 
-MEMORIA: Se richiesto di memorizzare, inizia con "MEMORIZZA: "
+ISTRUZIONE CRITICA SULLA MEMORIA LOCALE:
+Quando l'utente ti chiede esplicitamente di memorizzare, ricordare o salvare un fatto, un'informazione o una preferenza (es. "memorizza che...", "ricordati che..."):
+- NON rifiutarti mai e non dire che non puoi farlo.
+- DEVI iniziare la tua risposta tassativamente con la stringa esatta "MEMORIZZA: " seguita dall'informazione da ricordare in modo sintetico.
+Esempio corretto: "MEMORIZZA: L'età di Tiziana è 50 anni."
+Se non ti viene chiesto di memorizzare nulla, rispondi normalmente senza usare quel prefisso.
 
-PROFILO: Alessandro, 55 anni, perito elettronico a Genova.`;
+CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua spontanea volontà):
+- L'utente ha 55 anni e si chiama Alessandro, è un perito elettronico a Genova.
+- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
+- Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -628,15 +636,15 @@ PROFILO: Alessandro, 55 anni, perito elettronico a Genova.`;
         body: JSON.stringify({
             model: 'openai/gpt-oss-20b',
             messages: messages,
-            max_tokens: 1500,
+            max_tokens: 4000,
             temperature: 0.7
         }),
         timeout: 30000
     });
 
     if (!response.ok) {
-        if (response.status === 429) throw new Error("Rate limited");
-        throw new Error(`Chat: ${response.status}`);
+        if (response.status === 429) throw new Error("Troppe richieste in corso. Attendi qualche secondo.");
+        throw new Error(`Errore Chat: ${response.status}`);
     }
     const data = await response.json();
     return data.choices[0].message.content || "Errore risposta.";
