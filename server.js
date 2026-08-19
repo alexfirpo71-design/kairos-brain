@@ -620,7 +620,7 @@ ISTRUZIONE CRITICA SULLA MEMORIA LOCALE:
 Quando l'utente ti chiede esplicitamente di memorizzare, ricordare o salvare un fatto, un'informazione o una preferenza (es. "memorizza che...", "ricordati che..."):
 - NON rifiutarti mai e non dire che non puoi farlo.
 - DEVI iniziare la tua risposta tassativamente con la stringa esatta "MEMORIZZA: " seguita dall'informazione da ricordare in modo sintetico.
-Esempio corretto: "MEMORIZZA: L'età di Tiziana è 50 anni."
+Esempio corretto: "MEMORIZZA: L'età di Tiziana è 55 anni."
 Se non ti viene chiesto di memorizzare nulla, rispondi normalmente senza usare quel prefisso.
 
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito, non menzionarlo mai di tua spontanea volontà):
