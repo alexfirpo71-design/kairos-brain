@@ -475,7 +475,7 @@ wss.on('connection', (ws, req) => {
 
                             const isSessionActive = now < sessionActiveUntil;
 
-                            const hasWakeWord = rawText.includes('kairos') || rawText.includes('cairos') || rawText.includes('cairo') || rawText.includes('ehi');
+                            const hasWakeWord = rawText.includes('kairos') || rawText.includes('cairos') || rawText.includes('ehi');
 
                             if (!isSessionActive && !hasWakeWord) {
                                 console.log(`[Ignorato] Rumore di fondo o parlato estraneo: "${transcript}"`);
