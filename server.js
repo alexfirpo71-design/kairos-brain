@@ -358,6 +358,30 @@ wss.on('connection', (ws, req) => {
                             } else {
                                 ws.conversationHistory.push({ role: 'user', content: transcript });
                                 replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                                // --- GESTIONE MEMORIZZAZIONE AUTOMATICA ---
+if (replyText.startsWith("MEMORIZZA:")) {
+    // Isola la parte di comando e la parte da pronunciare
+    const parts = replyText.replace("MEMORIZZA:", "").trim().split('.');
+    // Oppure separiamo il comando vero e proprio dal testo parlato per l'utente
+    const memoryIndex = replyText.indexOf("="); // o un separatore pulito, oppure facciamo così:
+    
+    // Puliamo il testo per l'utente rimuovendo il tag di sistema
+    let cleanReplyForUser = replyText.replace("MEMORIZZA:", "").trim();
+    
+    // Estraiamo la regola pura da mandare all'ESP32 per salvarla in LittleFS
+    // Es: "MEMORIZZA: Tiziana ama il cioccolato. Fatto." -> salviamo "Tiziana ama il cioccolato"
+    console.log(`[💾 Memoria Rilevata] ${cleanReplyForUser}`);
+    
+    // Inviamo un comando JSON dedicato all'ESP32 affinché salvi il dato sulla sua Flash
+    ws.send(JSON.stringify({ 
+        action: 'save_memory', 
+        data: cleanReplyForUser 
+    }));
+    
+    // Assegniamo a replyText solo la parte discorsiva che Kairós deve pronunciare a voce
+    // (es. se l'IA risponde "MEMORIZZA: Tiziana ama il cioccolato. Fatto!", facciamo pronunciare solo "Fatto!")
+    replyText = "Fatto, memorizzato."; 
+}
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
 
                                 if (ws.conversationHistory.length > 10) {
