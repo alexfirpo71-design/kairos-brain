@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "form-data": "^4.0.0",
+    "ms-edge-tts": "^1.4.5",
     "node-fetch": "^3.3.2",
     "ws": "^8.18.0"
   }
