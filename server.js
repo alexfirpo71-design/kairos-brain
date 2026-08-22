@@ -227,6 +227,7 @@ wss.on('connection', (ws, req) => {
     ws.isSpeaking = false;
     ws.volume = 70;
     ws.isAlive = true;
+    ws.memories = ""; // Inizializzazione campo memorie
 
     let audioBuffer = [];
     let sessionActiveUntil = 0;
@@ -271,6 +272,13 @@ wss.on('connection', (ws, req) => {
 
             // Aggiorna info dispositivo
             if (data.user) ws.userName = data.user;
+
+            // Cattura i ricordi inviati dalla ESP32
+            if (data.memories) {
+                ws.memories = data.memories;
+                console.log(`[🧠 Memorie Caricate] ${data.memories.substring(0, 50)}...`);
+            }
+
             if (data.mac) {
                 ws.mac = data.mac;
                 if (!sessionHistories.has(data.mac)) {
@@ -357,31 +365,21 @@ wss.on('connection', (ws, req) => {
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             } else {
                                 ws.conversationHistory.push({ role: 'user', content: transcript });
-                                replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName);
+                                // Passiamo ws.memories alla funzione di chat
+                                replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName, ws.memories);
+                                
                                 // --- GESTIONE MEMORIZZAZIONE AUTOMATICA ---
-if (replyText.startsWith("MEMORIZZA:")) {
-    // Isola la parte di comando e la parte da pronunciare
-    const parts = replyText.replace("MEMORIZZA:", "").trim().split('.');
-    // Oppure separiamo il comando vero e proprio dal testo parlato per l'utente
-    const memoryIndex = replyText.indexOf("="); // o un separatore pulito, oppure facciamo così:
-    
-    // Puliamo il testo per l'utente rimuovendo il tag di sistema
-    let cleanReplyForUser = replyText.replace("MEMORIZZA:", "").trim();
-    
-    // Estraiamo la regola pura da mandare all'ESP32 per salvarla in LittleFS
-    // Es: "MEMORIZZA: Tiziana ama il cioccolato. Fatto." -> salviamo "Tiziana ama il cioccolato"
-    console.log(`[💾 Memoria Rilevata] ${cleanReplyForUser}`);
-    
-    // Inviamo un comando JSON dedicato all'ESP32 affinché salvi il dato sulla sua Flash
-    ws.send(JSON.stringify({ 
-        action: 'save_memory', 
-        data: cleanReplyForUser 
-    }));
-    
-    // Assegniamo a replyText solo la parte discorsiva che Kairós deve pronunciare a voce
-    // (es. se l'IA risponde "MEMORIZZA: Tiziana ama il cioccolato. Fatto!", facciamo pronunciare solo "Fatto!")
-    replyText = "Fatto, memorizzato."; 
-}
+                                if (replyText.startsWith("MEMORIZZA:")) {
+                                    let cleanReplyForUser = replyText.replace("MEMORIZZA:", "").trim();
+                                    console.log(`[💾 Memoria Rilevata] ${cleanReplyForUser}`);
+                                    
+                                    ws.send(JSON.stringify({ 
+                                        action: 'save_memory', 
+                                        data: cleanReplyForUser 
+                                    }));
+                                    
+                                    replyText = "Fatto, memorizzato."; 
+                                }
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
 
                                 if (ws.conversationHistory.length > 10) {
@@ -653,9 +651,9 @@ async function transcribeAudio(audioBuffer) {
     return data.text || "";
 }
 
-async function getGroqChatResponse(conversationHistory, userName = "Alessandro") {
+async function getGroqChatResponse(conversationHistory, userName = "Alessandro", dynamicMemories = "") {
     const apiKey = process.env.GROQ_API_KEY;
-   const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
+    const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini e solo quando viene richiesto.
 
 ISTRUZIONE CRITICA SULLA MEMORIA LOCALE:
@@ -665,10 +663,14 @@ Quando l'utente ti chiede esplicitamente di memorizzare, ricordare o salvare un 
 Esempio esatto di risposta: "MEMORIZZA: L'età di Tiziana è 55 anni. Fatto, ho memorizzato l'età di Tiziana."
 Se non ti viene chiesto di memorizzare nulla, rispondi normalmente SENZA usare quel prefisso.
 
+RICORDI SALVATI SUL DISPOSITIVO DELL'UTENTE (da usare attivamente se interrogato):
+${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al momento."}
+
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
 - L'utente ha 55 anni e si chiama Alessandro, è un perito elettronico a Genova.
 - Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
 - Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
+
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
