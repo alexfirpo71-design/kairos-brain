@@ -184,7 +184,7 @@ async function handleImageUpload(req, res) {
                                 );
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 300));
+                        await new Promise(resolve => setTimeout(resolve, 400));
                     }
 
                     if (activeWsClient && activeWsClient.isSpeaking && activeWsClient.readyState === activeWsClient.OPEN) {
@@ -411,7 +411,7 @@ wss.on('connection', (ws, req) => {
                                 ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 300));
+                        await new Promise(resolve => setTimeout(resolve, 400));
                     }
 
                     if (ws.isSpeaking && ws.readyState === ws.OPEN) {
@@ -452,7 +452,6 @@ function splitTextIntoChunks(text, maxLength = 180) {
     if (!text || text.length === 0) return [];
     if (text.length <= maxLength) return [text];
 
-    // Spezza preferibilmente sui punti, punti e virgola o virgole per evitare blocchi troppo lunghi
     const sentences = text.match(/[^.!?;:]+[.!?;:]+["']?|.+$/g) || [text];
     let chunks = [];
     let currentChunk = "";
@@ -529,9 +528,12 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
+            // Compressore dinamico integrato per normalizzare il volume ed evitare sbalzi
+            const audioFilters = `compand=attacks=0:points=-70/-70|-45/-20|0/-10:gain=5,volume=${volumeFactor}`;
+
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
-                '-af', `volume=${volumeFactor}`,
+                '-af', audioFilters,
                 '-f', 's16le',
                 '-acodec', 'pcm_s16le',
                 '-ac', '1',
@@ -680,28 +682,6 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
     }
     const data = await response.json();
     return data.choices[0].message.content || "Errore risposta.";
-}
-
-/**
- * Gestisce eventuali log di sistema o notifiche asincrone per i client connessi.
- */
-function broadcastStatus(statusMessage) {
-    if (activeWsClient && activeWsClient.readyState === activeWsClient.OPEN) {
-        activeWsClient.send(JSON.stringify({
-            action: 'status',
-            message: statusMessage,
-            timestamp: new Date().toISOString()
-        }));
-    }
-}
-
-/**
- * Validatore rapido per i comandi vocali in ingresso.
- */
-function validateVoiceCommand(transcript) {
-    if (!transcript) return false;
-    const clean = transcript.trim();
-    return clean.length > 1;
 }
 
 // =============================================
