@@ -159,7 +159,7 @@ async function handleImageUpload(req, res) {
                 activeWsClient.send(JSON.stringify({ action: 'speak', text: resultText.trim() }));
 
                 try {
-                    const textChunks = splitTextIntoChunks(resultText, 180);
+                    const textChunks = splitTextIntoChunks(resultText, 250);
                     console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi`);
 
                     for (let chunk of textChunks) {
@@ -184,7 +184,7 @@ async function handleImageUpload(req, res) {
                                 );
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 100));
+                        await new Promise(resolve => setTimeout(resolve, 300));
                     }
 
                     if (activeWsClient && activeWsClient.isSpeaking && activeWsClient.readyState === activeWsClient.OPEN) {
@@ -194,7 +194,7 @@ async function handleImageUpload(req, res) {
                     activeWsClient.isSpeaking = false;
 
                 } catch (streamErr) {
-                    console.error('[❌ TTS Stream Error]', streamErr.message);
+                    console.error('[❌ TTS Error]', streamErr.message);
                     if (activeWsClient) activeWsClient.isSpeaking = false;
                 }
             }
@@ -391,8 +391,7 @@ wss.on('connection', (ws, req) => {
                 sessionActiveUntil = Date.now() + 600000;
 
                 try {
-                    const textChunks = splitTextIntoChunks(replyText, 180);
-                    console.log(`[📝 Chunks Chat] Diviso in ${textChunks.length} pezzi`);
+                    const textChunks = splitTextIntoChunks(replyText, 250);
 
                     for (let chunk of textChunks) {
                         if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
@@ -412,7 +411,7 @@ wss.on('connection', (ws, req) => {
                                 ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 100));
+                        await new Promise(resolve => setTimeout(resolve, 300));
                     }
 
                     if (ws.isSpeaking && ws.readyState === ws.OPEN) {
@@ -428,7 +427,7 @@ wss.on('connection', (ws, req) => {
                 }
             }
         } catch (e) {
-            console.error('[❌ WS Message Error]', e.message);
+            // Silent fallback per messaggi non-JSON
         }
     });
 
@@ -449,11 +448,11 @@ wss.on('connection', (ws, req) => {
 // --- UTILITY FUNCTIONS ---
 // =============================================
 
-function splitTextIntoChunks(text, maxLength = 180) {
+function splitTextIntoChunks(text, maxLength = 250) {
     if (!text || text.length === 0) return [];
     if (text.length <= maxLength) return [text];
 
-    const sentences = text.match(/[^.!?;:]+[.!?;:]+["']?|.+$/g) || [text];
+    const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
     let chunks = [];
     let currentChunk = "";
 
@@ -519,7 +518,7 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         });
 
         if (!response.ok) {
-            console.error(`[❌ TTS Fetch Error] Status ${response.status}`);
+            console.error(`[❌ TTS] Status ${response.status}`);
             return null;
         }
 
@@ -529,12 +528,10 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
-            // dynaudnorm normalizza il volume senza sbalzi | afade elimina i fruscii all'inizio/fine chunk
-            const audioFilters = `dynaudnorm=f=150:g=15,afade=t=in:st=0:d=0.005,volume=${volumeFactor}`;
-
+            // Filtri FFmpeg semplificati per evitare l'effetto robotico metallico
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
-                '-af', audioFilters,
+                '-af', `volume=${volumeFactor}`,
                 '-f', 's16le',
                 '-acodec', 'pcm_s16le',
                 '-ac', '1',
@@ -552,9 +549,29 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
 
                 if (code === 0) {
                     let pcmBuffer = Buffer.concat(chunks);
-                    resolve(pcmBuffer);
+
+                    const silenceSamples = 4000;
+                    let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
+
+                    const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
+                    for (let i = 0; i < fadeSamplesIn; i++) {
+                        const sample = paddedPcmBuffer.readInt16LE(i * 2);
+                        const multiplier = i / fadeSamplesIn;
+                        paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
+                    }
+
+                    const fadeSamplesOut = silenceSamples;
+                    const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
+                    for (let i = 0; i < fadeSamplesOut; i++) {
+                        const idx = (startOutIdx + i) * 2;
+                        const sample = paddedPcmBuffer.readInt16LE(idx);
+                        const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
+                        paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
+                    }
+
+                    resolve(paddedPcmBuffer);
                 } else {
-                    reject(new Error(`FFmpeg exited with code ${code}`));
+                    reject(new Error(`FFmpeg code ${code}`));
                 }
             });
 
@@ -572,7 +589,7 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
             ffmpeg.stdin.end();
         });
     } catch (err) {
-        console.error('[❌ TTS Processing Error]', err.message);
+        console.error('[❌ TTS Error]', err.message);
         return null;
     }
 }
@@ -639,9 +656,9 @@ RICORDI SALVATI SUL DISPOSITIVO DELL'UTENTE (da usare attivamente se interrogato
 ${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al momento."}
 
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
-- L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
-- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 23 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
-- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.`;
+- L'utente ha 55 anni e si chiama Alessandro, è un perito elettronico a Genova.
+- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
+- Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
