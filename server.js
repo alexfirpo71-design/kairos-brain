@@ -225,14 +225,14 @@ wss.on('connection', (ws, req) => {
     ws.userName = "Alessandro";
     ws.conversationHistory = [];
     ws.isSpeaking = false;
-    ws.isProcessing = false; // Flag anti-spam / anti-flood
+    ws.isProcessing = false; 
     ws.volume = 70;
     ws.isAlive = true;
     ws.memories = "";
 
     let audioBuffer = [];
     let sessionActiveUntil = 0;
-    let lastRequestTime = 0; // Timestamp ultima richiesta elaborata
+    let lastRequestTime = 0; 
     const SESSION_DURATION_MS = 20000;
 
     // --- HEARTBEAT PING/PONG ---
@@ -254,7 +254,7 @@ wss.on('connection', (ws, req) => {
     ws.on('message', async (message, isBinary) => {
         try {
             if (isBinary) {
-                if (ws.isSpeaking || ws.isProcessing) return; // Ignora audio se sta parlando o elaborando
+                if (ws.isSpeaking || ws.isProcessing) return; // Ignora pacchetti audio se occupato
                 audioBuffer.push(message);
                 return;
             }
@@ -292,10 +292,10 @@ wss.on('connection', (ws, req) => {
             }
 
             if (data.state === 'processing') {
-                // --- PROTEZIONE RATE LIMIT & DOPPIO INVIO ---
+                // --- BLOCCO TOTALE ANTI-FLOOD (4 SECONDI DI COOLDOWN) ---
                 const nowTime = Date.now();
-                if (ws.isProcessing || (nowTime - lastRequestTime < 2500)) {
-                    console.log('[⚠️ Rate Limit Locale] Richiesta ignorata: elaborazione già in corso o cooldown attivo.');
+                if (ws.isSpeaking || ws.isProcessing || (nowTime - lastRequestTime < 4000)) {
+                    console.log('[⚠️ Anti-Flood] Richiesta audio scartata: Kairós è occupato o in cooldown.');
                     audioBuffer = [];
                     return;
                 }
@@ -395,10 +395,17 @@ wss.on('connection', (ws, req) => {
                         }
 
                         console.log(`[💬 Risposta] "${replyText.substring(0, 60)}..." | Vol: ${ws.volume}%`);
+                    } else {
+                        ws.isProcessing = false;
+                        return;
                     }
                 } catch (err) {
                     console.error('[❌ AI Error]', err.message);
-                    replyText = "Si è verificato un errore.";
+                    if (err.message.includes("429")) {
+                        replyText = "Il sistema è momentaneamente sovraccarico, attendi un secondo.";
+                    } else {
+                        replyText = "Si è verificato un errore.";
+                    }
                 }
 
                 if (!replyText || replyText.trim().length === 0) {
@@ -439,17 +446,18 @@ wss.on('connection', (ws, req) => {
                         ws.send(JSON.stringify({ action: 'stop' }));
                     }
                     ws.isSpeaking = false;
-                    ws.isProcessing = false; // Sblocca nuove richieste al termine dello streaming audio
+                    ws.isProcessing = false; // Sblocca nuove richieste solo alla fine dello streaming
                     sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                 } catch (streamErr) {
                     console.error('[❌ Streaming Error]', streamErr.message);
                     ws.isSpeaking = false;
-                    ws.isProcessing = false;
+                    ws.isProcessing = false; // Sblocca anche in caso di errore nello streaming
                 }
             }
         } catch (e) {
             ws.isProcessing = false;
+            ws.isSpeaking = false;
         }
     });
 
@@ -465,6 +473,7 @@ wss.on('connection', (ws, req) => {
     ws.on('error', (err) => {
         console.error('[❌ WS Error]', err.message);
         ws.isProcessing = false;
+        ws.isSpeaking = false;
     });
 });
 
