@@ -225,12 +225,14 @@ wss.on('connection', (ws, req) => {
     ws.userName = "Alessandro";
     ws.conversationHistory = [];
     ws.isSpeaking = false;
+    ws.isProcessing = false; // Flag anti-spam / anti-flood
     ws.volume = 70;
     ws.isAlive = true;
     ws.memories = "";
 
     let audioBuffer = [];
     let sessionActiveUntil = 0;
+    let lastRequestTime = 0; // Timestamp ultima richiesta elaborata
     const SESSION_DURATION_MS = 20000;
 
     // --- HEARTBEAT PING/PONG ---
@@ -252,7 +254,7 @@ wss.on('connection', (ws, req) => {
     ws.on('message', async (message, isBinary) => {
         try {
             if (isBinary) {
-                if (ws.isSpeaking) return;
+                if (ws.isSpeaking || ws.isProcessing) return; // Ignora audio se sta parlando o elaborando
                 audioBuffer.push(message);
                 return;
             }
@@ -262,6 +264,7 @@ wss.on('connection', (ws, req) => {
             if (data.action === 'stop') {
                 console.log('[⏹️ Stop] Comando ricevuto');
                 ws.isSpeaking = false;
+                ws.isProcessing = false;
                 audioBuffer = [];
                 return;
             }
@@ -289,11 +292,23 @@ wss.on('connection', (ws, req) => {
             }
 
             if (data.state === 'processing') {
+                // --- PROTEZIONE RATE LIMIT & DOPPIO INVIO ---
+                const nowTime = Date.now();
+                if (ws.isProcessing || (nowTime - lastRequestTime < 2500)) {
+                    console.log('[⚠️ Rate Limit Locale] Richiesta ignorata: elaborazione già in corso o cooldown attivo.');
+                    audioBuffer = [];
+                    return;
+                }
+
+                ws.isProcessing = true;
+                lastRequestTime = nowTime;
+
                 const completeAudioBuffer = Buffer.concat(audioBuffer);
                 audioBuffer = [];
 
                 if (completeAudioBuffer.length === 0) {
                     console.log('[⚠️ Audio] Buffer vuoto');
+                    ws.isProcessing = false;
                     return;
                 }
 
@@ -314,6 +329,7 @@ wss.on('connection', (ws, req) => {
 
                         if (!isSessionActive && !hasWakeWord) {
                             console.log('[🔇 VAD] Comando ignorato');
+                            ws.isProcessing = false;
                             return;
                         }
 
@@ -321,6 +337,7 @@ wss.on('connection', (ws, req) => {
 
                         if (/stop|fermati|basta|silenzio/.test(rawText)) {
                             ws.isSpeaking = false;
+                            ws.isProcessing = false;
                             ws.send(JSON.stringify({ action: 'stop' }));
                             sessionActiveUntil = 0;
                             console.log('[✓ Stop] Eseguito');
@@ -384,7 +401,10 @@ wss.on('connection', (ws, req) => {
                     replyText = "Si è verificato un errore.";
                 }
 
-                if (!replyText || replyText.trim().length === 0) return;
+                if (!replyText || replyText.trim().length === 0) {
+                    ws.isProcessing = false;
+                    return;
+                }
 
                 ws.isSpeaking = true;
                 ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
@@ -419,21 +439,24 @@ wss.on('connection', (ws, req) => {
                         ws.send(JSON.stringify({ action: 'stop' }));
                     }
                     ws.isSpeaking = false;
+                    ws.isProcessing = false; // Sblocca nuove richieste al termine dello streaming audio
                     sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                 } catch (streamErr) {
                     console.error('[❌ Streaming Error]', streamErr.message);
                     ws.isSpeaking = false;
+                    ws.isProcessing = false;
                 }
             }
         } catch (e) {
-            // Silent fallback per messaggi non-JSON
+            ws.isProcessing = false;
         }
     });
 
     ws.on('close', () => {
         clearInterval(pingInterval);
         ws.isSpeaking = false;
+        ws.isProcessing = false;
         audioBuffer = [];
         if (activeWsClient === ws) activeWsClient = null;
         console.log('[❌ WS Disconnected]\n');
@@ -441,6 +464,7 @@ wss.on('connection', (ws, req) => {
 
     ws.on('error', (err) => {
         console.error('[❌ WS Error]', err.message);
+        ws.isProcessing = false;
     });
 });
 
@@ -528,7 +552,6 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
-            // Compressore dinamico integrato per normalizzare il volume ed evitare sbalzi
             const audioFilters = `compand=attacks=0:points=-70/-70|-45/-20|0/-10:gain=5,volume=${volumeFactor}`;
 
             const ffmpeg = spawn('ffmpeg', [
