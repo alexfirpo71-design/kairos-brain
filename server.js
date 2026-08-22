@@ -2,7 +2,6 @@ import http, { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
-import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -153,46 +152,29 @@ async function handleImageUpload(req, res) {
 
             // --- INVIA RISPOSTA AL CLIENT ESP32 ---
             if (activeWsClient && activeWsClient.readyState === activeWsClient.OPEN) {
-                console.log('[🔊 TTS] Preparazione risposta audio...');
+                console.log('[🔊 TTS] Preparazione risposta audio (Google Translate)...');
                 activeWsClient.isSpeaking = true;
                 activeWsClient.send(JSON.stringify({ action: 'speak', text: resultText.trim() }));
 
                 try {
-                    const textChunks = splitTextIntoChunks(resultText, 250);
-                    console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi`);
-
-                    for (let chunk of textChunks) {
-                        if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) {
-                            break;
-                        }
-
-                        const pcmPart = await getSingleTtsPcm(chunk, activeWsClient.volume || 70);
-
-                        if (pcmPart && pcmPart.length > 0) {
-                            const chunkSize = 2048; // Ridotto a 2048 per l'ESP32
-                            for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN) break;
-
-                                while (activeWsClient.bufferedAmount > 32768) {
-                                    await new Promise(resolve => setTimeout(resolve, 10));
-                                }
-
-                                activeWsClient.send(
-                                    pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)),
-                                    { binary: true }
-                                );
-                                await new Promise(resolve => setTimeout(resolve, 5));
+                    const ttsBuffer = await getGoogleTranslatePcm(resultText.trim());
+                    if (ttsBuffer && ttsBuffer.length > 0) {
+                        const chunkSize = 4096;
+                        for (let i = 0; i < ttsBuffer.length; i += chunkSize) {
+                            if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN) break;
+                            while (activeWsClient.bufferedAmount > 65536) {
+                                await new Promise(resolve => setTimeout(resolve, 20));
                             }
+                            activeWsClient.send(
+                                ttsBuffer.subarray(i, i + Math.min(chunkSize, ttsBuffer.length - i)),
+                                { binary: true }
+                            );
                         }
-                        await new Promise(resolve => setTimeout(resolve, 300));
                     }
-
-                    if (activeWsClient && activeWsClient.isSpeaking && activeWsClient.readyState === activeWsClient.OPEN) {
-                        console.log('[✓ TTS] Streaming audio completato');
+                    if (activeWsClient && activeWsClient.readyState === activeWsClient.OPEN) {
                         activeWsClient.send(JSON.stringify({ action: 'stop' }));
                     }
                     activeWsClient.isSpeaking = false;
-
                 } catch (streamErr) {
                     console.error('[❌ TTS Error]', streamErr.message);
                     if (activeWsClient) activeWsClient.isSpeaking = false;
@@ -389,32 +371,20 @@ wss.on('connection', (ws, req) => {
                 sessionActiveUntil = Date.now() + 600000;
 
                 try {
-                    const textChunks = splitTextIntoChunks(replyText, 250);
+                    const ttsBuffer = await getGoogleTranslatePcm(replyText.trim());
 
-                    for (let chunk of textChunks) {
-                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-
-                        sessionActiveUntil = Date.now() + 600000;
-                        const pcmPart = await getSingleTtsPcm(chunk, ws.volume);
-
-                        if (pcmPart && pcmPart.length > 0) {
-                            const chunkSize = 2048; // Ridotto a 2048 per l'ESP32
-                            for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-
-                                while (ws.bufferedAmount > 32768) {
-                                    await new Promise(resolve => setTimeout(resolve, 10));
-                                }
-
-                                ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
-                                await new Promise(resolve => setTimeout(resolve, 5));
+                    if (ttsBuffer && ttsBuffer.length > 0) {
+                        const chunkSize = 4096;
+                        for (let i = 0; i < ttsBuffer.length; i += chunkSize) {
+                            if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                            while (ws.bufferedAmount > 65536) {
+                                await new Promise(resolve => setTimeout(resolve, 20));
                             }
+                            ws.send(ttsBuffer.subarray(i, i + Math.min(chunkSize, ttsBuffer.length - i)), { binary: true });
                         }
-                        await new Promise(resolve => setTimeout(resolve, 300));
                     }
 
                     if (ws.isSpeaking && ws.readyState === ws.OPEN) {
-                        console.log('[✓ Chat] Streaming completato');
                         ws.send(JSON.stringify({ action: 'stop' }));
                     }
                     ws.isSpeaking = false;
@@ -447,95 +417,29 @@ wss.on('connection', (ws, req) => {
 // --- UTILITY FUNCTIONS ---
 // =============================================
 
-function splitTextIntoChunks(text, maxLength = 250) {
-    if (!text || text.length === 0) return [];
-    if (text.length <= maxLength) return [text];
-
-    const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
-    let chunks = [];
-    let currentChunk = "";
-
-    for (let sentence of sentences) {
-        if ((currentChunk + sentence).length <= maxLength) {
-            currentChunk += sentence;
-        } else {
-            if (currentChunk) chunks.push(currentChunk.trim());
-            if (sentence.length > maxLength) {
-                let words = sentence.split(" ");
-                let subChunk = "";
-                for (let word of words) {
-                    if ((subChunk + " " + word).length <= maxLength) {
-                        subChunk += (subChunk ? " " : "") + word;
-                    } else {
-                        if (subChunk) chunks.push(subChunk.trim());
-                        subChunk = word;
-                    }
-                }
-                currentChunk = subChunk;
-            } else {
-                currentChunk = sentence;
-            }
-        }
-    }
-    if (currentChunk) chunks.push(currentChunk.trim());
-    return chunks;
-}
-
-function formatTimeForSpeech(text) {
-    return text.replace(/\b([0-2]?[0-9])[:\.]([0-5][0-9])\b/g, (match, hours, minutes) => {
-        const h = parseInt(hours, 10);
-        const m = parseInt(minutes, 10);
-
-        let hourText = h === 1 ? "l'una" : `le ${h}`;
-        if (h === 0) hourText = "le ore zero";
-
-        if (m === 0) return `${hourText} in punto`;
-        if (m < 10) return `${hourText} e zero ${m}`;
-        return `${hourText} e ${m}`;
-    });
-}
-
-// --- EDGE TTS DIRECT HTTP IMPLEMENTATION ---
-async function getSingleTtsPcm(textChunk, volumePercent = 70) {
-    if (!textChunk || textChunk.trim().length === 0) return null;
-
+async function getGoogleTranslatePcm(text) {
     try {
-        const timeFormatted = formatTimeForSpeech(textChunk);
-        const speechFriendlyText = timeFormatted.replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
-        const sanitizedText = speechFriendlyText
-            .replace(/[*#_`~[\]()>]/g, '')
-            .replace(/[^\w\sàèéìòùÀÈÉÌÒÙ.,?!]/g, '')
-            .trim();
+        const encodedText = encodeURIComponent(text);
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=it&client=tw-ob&ttsspeed=1`;
 
-        if (sanitizedText.length === 0) return null;
-
-        const xr_id = '63C0123456789ABCDEF0123456789ABC';
-        const ttsUrl = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/v1?trustedclienttoken=6A5AA1D4EAFF4E9fb37e23d68491d6f4&ConnectionId=${xr_id}`;
-        
-        const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='it-IT'><voice name='it-IT-DiegoNeural'>${sanitizedText}</voice></speak>`;
-
-        const ttsResponse = await fetch(ttsUrl, {
-            method: 'POST',
+        const response = await fetch(url, {
             headers: {
-                'Content-Type': 'application/ssml+xml',
-                'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.2210.91'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
             },
-            body: ssml,
-            timeout: 15000
+            timeout: 10000
         });
 
-        if (!ttsResponse.ok) {
-            throw new Error(`Edge TTS HTTP error: ${ttsResponse.status}`);
+        if (!response.ok) {
+            throw new Error(`Google TTS error: ${response.status}`);
         }
 
-        const mp3Buffer = await ttsResponse.buffer();
-        const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
+        const mp3Buffer = await response.buffer();
 
-        return await new Promise((resolve, reject) => {
+        // Convertiamo direttamente in PCM 16kHz mono pulito tramite FFmpeg
+        return new Promise((resolve, reject) => {
+            const { spawn } = require('child_process');
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
-                '-af', `volume=${volumeFactor}`,
                 '-f', 's16le',
                 '-acodec', 'pcm_s16le',
                 '-ac', '1',
@@ -544,56 +448,22 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
             ], { stdio: ['pipe', 'pipe', 'ignore'] });
 
             let chunks = [];
-            let errorOccurred = false;
-
             ffmpeg.stdout.on('data', chunk => chunks.push(chunk));
-
             ffmpeg.on('close', code => {
-                if (errorOccurred) return;
-
                 if (code === 0) {
-                    let pcmBuffer = Buffer.concat(chunks);
-
-                    const silenceSamples = 4000;
-                    let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
-
-                    const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
-                    for (let i = 0; i < fadeSamplesIn; i++) {
-                        const sample = paddedPcmBuffer.readInt16LE(i * 2);
-                        const multiplier = i / fadeSamplesIn;
-                        paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
-                    }
-
-                    const fadeSamplesOut = silenceSamples;
-                    const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
-                    for (let i = 0; i < fadeSamplesOut; i++) {
-                        const idx = (startOutIdx + i) * 2;
-                        const sample = paddedPcmBuffer.readInt16LE(idx);
-                        const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
-                        paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
-                    }
-
-                    resolve(paddedPcmBuffer);
+                    resolve(Buffer.concat(chunks));
                 } else {
-                    reject(new Error(`FFmpeg code ${code}`));
+                    reject(new Error(`FFmpeg exited with code ${code}`));
                 }
             });
-
-            ffmpeg.on('error', err => {
-                errorOccurred = true;
-                reject(err);
-            });
-
-            ffmpeg.stdin.on('error', err => {
-                errorOccurred = true;
-                reject(err);
-            });
+            ffmpeg.on('error', err => reject(err));
 
             ffmpeg.stdin.write(mp3Buffer);
             ffmpeg.stdin.end();
         });
+
     } catch (err) {
-        console.error('[❌ Edge TTS Error]', err.message);
+        console.error('[❌ TTS Error]', err.message);
         return null;
     }
 }
@@ -692,7 +562,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`\n╔════════════════════════════════════╗`);
-    console.log(`║  🚀 Kairós Brain Server (Edge)     ║`);
+    console.log(`║  🚀 Kairós Brain Server (Translate)║`);
     console.log(`║  Port: ${PORT}                        ║`);
     console.log(`║  Status: ACTIVE                    ║`);
     console.log(`╚════════════════════════════════════╝\n`);
