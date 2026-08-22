@@ -493,7 +493,7 @@ function formatTimeForSpeech(text) {
     });
 }
 
-// --- EDGE TTS DIRECT HTTP IMPLEMENTATION ---
+// --- EDGE TTS DIRECT HTTP IMPLEMENTATION (CORRETTA) ---
 async function getSingleTtsPcm(textChunk, volumePercent = 70) {
     if (!textChunk || textChunk.trim().length === 0) return null;
 
@@ -507,16 +507,17 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
 
         if (sanitizedText.length === 0) return null;
 
-        // Chiamata diretta all'endpoint pubblico di Edge TTS (Voce Diego)
-        const ttsUrl = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/v1?trustedclienttoken=6A5AA1D4EAFF4E9fb37e23d68491d6f4`;
-        const ssml = `<speak version='1.0' xml:lang='it-IT'><voice name='it-IT-DiegoNeural'>${sanitizedText}</voice></speak>`;
+        const xr_id = '63C0123456789ABCDEF0123456789ABC';
+        const ttsUrl = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/v1?trustedclienttoken=6A5AA1D4EAFF4E9fb37e23d68491d6f4&ConnectionId=${xr_id}`;
+        
+        const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='it-IT'><voice name='it-IT-DiegoNeural'>${sanitizedText}</voice></speak>`;
 
         const ttsResponse = await fetch(ttsUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/ssml+xml',
                 'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36 Edg/115.0.1901.188'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.2210.91'
             },
             body: ssml,
             timeout: 15000
