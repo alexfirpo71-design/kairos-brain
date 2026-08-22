@@ -6,7 +6,6 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { MsEdgeTTS, Voices } from 'ms-edge-tts';
 
 // Definizione __dirname per ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -139,7 +138,6 @@ async function handleImageUpload(req, res) {
             const visionData = await visionResponse.json();
             let resultText = visionData.choices[0].message.content.trim();
 
-            // Pulizia risposta
             resultText = resultText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
             if (resultText.includes("4.")) {
                 const parts = resultText.split(/4\.\s*\*\*.*?\*\*:/i);
@@ -234,7 +232,6 @@ wss.on('connection', (ws, req) => {
     let sessionActiveUntil = 0;
     const SESSION_DURATION_MS = 20000;
 
-    // --- HEARTBEAT PING/PONG ---
     ws.on('pong', () => {
         ws.isAlive = true;
     });
@@ -249,7 +246,6 @@ wss.on('connection', (ws, req) => {
         ws.ping();
     }, 30000);
 
-    // --- MESSAGE HANDLER ---
     ws.on('message', async (message, isBinary) => {
         try {
             if (isBinary) {
@@ -428,7 +424,7 @@ wss.on('connection', (ws, req) => {
                 }
             }
         } catch (e) {
-            // Silent fallback per messaggi non-JSON
+            // Silent fallback
         }
     });
 
@@ -497,6 +493,7 @@ function formatTimeForSpeech(text) {
     });
 }
 
+// --- EDGE TTS DIRECT HTTP IMPLEMENTATION ---
 async function getSingleTtsPcm(textChunk, volumePercent = 70) {
     if (!textChunk || textChunk.trim().length === 0) return null;
 
@@ -510,17 +507,26 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
 
         if (sanitizedText.length === 0) return null;
 
-        // --- EDGE TTS INTEGRATION ---
-        const tts = new MsEdgeTTS();
-        await tts.setMetadata("it-IT-DiegoNeural", Voices.Network);
-        const audioStream = tts.toStream(sanitizedText);
+        // Chiamata diretta all'endpoint pubblico di Edge TTS (Voce Diego)
+        const ttsUrl = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/v1?trustedclienttoken=6A5AA1D4EAFF4E9fb37e23d68491d6f4`;
+        const ssml = `<speak version='1.0' xml:lang='it-IT'><voice name='it-IT-DiegoNeural'>${sanitizedText}</voice></speak>`;
 
-        const mp3Chunks = [];
-        for await (const chunk of audioStream) {
-            mp3Chunks.push(chunk);
+        const ttsResponse = await fetch(ttsUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/ssml+xml',
+                'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36 Edg/115.0.1901.188'
+            },
+            body: ssml,
+            timeout: 15000
+        });
+
+        if (!ttsResponse.ok) {
+            throw new Error(`Edge TTS HTTP error: ${ttsResponse.status}`);
         }
-        const mp3Buffer = Buffer.concat(mp3Chunks);
 
+        const mp3Buffer = await ttsResponse.buffer();
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
