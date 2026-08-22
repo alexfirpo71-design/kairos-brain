@@ -184,7 +184,7 @@ async function handleImageUpload(req, res) {
                                 );
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 300));
+                        await new Promise(resolve => setTimeout(resolve, 150));
                     }
 
                     if (activeWsClient && activeWsClient.isSpeaking && activeWsClient.readyState === activeWsClient.OPEN) {
@@ -411,7 +411,7 @@ wss.on('connection', (ws, req) => {
                                 ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 300));
+                        await new Promise(resolve => setTimeout(resolve, 150));
                     }
 
                     if (ws.isSpeaking && ws.readyState === ws.OPEN) {
@@ -525,13 +525,10 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const arrayBuffer = await response.arrayBuffer();
         const mp3Buffer = Buffer.from(arrayBuffer);
 
-        const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
-
         return await new Promise((resolve, reject) => {
-            // Filtri FFmpeg semplificati per evitare l'effetto robotico metallico
+            // FFmpeg pulito senza filtri di volume o fade manuali che distorcono l'audio
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
-                '-af', `volume=${volumeFactor}`,
                 '-f', 's16le',
                 '-acodec', 'pcm_s16le',
                 '-ac', '1',
@@ -549,27 +546,7 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
 
                 if (code === 0) {
                     let pcmBuffer = Buffer.concat(chunks);
-
-                    const silenceSamples = 4000;
-                    let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
-
-                    const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
-                    for (let i = 0; i < fadeSamplesIn; i++) {
-                        const sample = paddedPcmBuffer.readInt16LE(i * 2);
-                        const multiplier = i / fadeSamplesIn;
-                        paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
-                    }
-
-                    const fadeSamplesOut = silenceSamples;
-                    const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
-                    for (let i = 0; i < fadeSamplesOut; i++) {
-                        const idx = (startOutIdx + i) * 2;
-                        const sample = paddedPcmBuffer.readInt16LE(idx);
-                        const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
-                        paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
-                    }
-
-                    resolve(paddedPcmBuffer);
+                    resolve(pcmBuffer);
                 } else {
                     reject(new Error(`FFmpeg code ${code}`));
                 }
