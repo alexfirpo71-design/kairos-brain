@@ -159,7 +159,7 @@ async function handleImageUpload(req, res) {
                 activeWsClient.send(JSON.stringify({ action: 'speak', text: resultText.trim() }));
 
                 try {
-                    const textChunks = splitTextIntoChunks(resultText, 150);
+                    const textChunks = splitTextIntoChunks(resultText, 250);
                     console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi`);
 
                     for (let chunk of textChunks) {
@@ -227,7 +227,7 @@ wss.on('connection', (ws, req) => {
     ws.isSpeaking = false;
     ws.volume = 70;
     ws.isAlive = true;
-    ws.memories = ""; // Inizializzazione campo memorie
+    ws.memories = "";
 
     let audioBuffer = [];
     let sessionActiveUntil = 0;
@@ -251,14 +251,12 @@ wss.on('connection', (ws, req) => {
     // --- MESSAGE HANDLER ---
     ws.on('message', async (message, isBinary) => {
         try {
-            // Audio binario
             if (isBinary) {
                 if (ws.isSpeaking) return;
                 audioBuffer.push(message);
                 return;
             }
 
-            // Testo JSON
             const data = JSON.parse(message.toString());
 
             if (data.action === 'stop') {
@@ -270,10 +268,8 @@ wss.on('connection', (ws, req) => {
 
             if (ws.isSpeaking) return;
 
-            // Aggiorna info dispositivo
             if (data.user) ws.userName = data.user;
 
-            // Cattura i ricordi inviati dalla ESP32
             if (data.memories) {
                 ws.memories = data.memories;
                 console.log(`[🧠 Memorie Caricate] ${data.memories.substring(0, 50)}...`);
@@ -288,12 +284,10 @@ wss.on('connection', (ws, req) => {
                 console.log(`[👤 Device] MAC: ${data.mac}, User: ${ws.userName}`);
             }
 
-            // Ignora messaggi di handshake
             if (data.device || data.location || data.status) {
                 return;
             }
 
-            // Processing audio
             if (data.state === 'processing') {
                 const completeAudioBuffer = Buffer.concat(audioBuffer);
                 audioBuffer = [];
@@ -306,7 +300,6 @@ wss.on('connection', (ws, req) => {
                 let replyText = null;
 
                 try {
-                    // Trascrizione audio
                     const transcript = await transcribeAudio(completeAudioBuffer);
                     console.log(`[🎙️ Whisper] "${transcript}"`);
 
@@ -326,7 +319,6 @@ wss.on('connection', (ws, req) => {
 
                         sessionActiveUntil = now + SESSION_DURATION_MS;
 
-                        // --- COMANDI SPECIALI ---
                         if (/stop|fermati|basta|silenzio/.test(rawText)) {
                             ws.isSpeaking = false;
                             ws.send(JSON.stringify({ action: 'stop' }));
@@ -355,7 +347,6 @@ wss.on('connection', (ws, req) => {
                             ws.conversationHistory.push({ role: 'assistant', content: replyText });
                         }
                         else {
-                            // Chat IA normale
                             const isOnlyWakeWord = /^(kairos|ehi kairos|cairos|ehi kairos|ehi|cairo)$/.test(rawText)
                                 || rawText.length < 5;
 
@@ -365,10 +356,8 @@ wss.on('connection', (ws, req) => {
                                 ws.conversationHistory.push({ role: 'assistant', content: replyText });
                             } else {
                                 ws.conversationHistory.push({ role: 'user', content: transcript });
-                                // Passiamo ws.memories alla funzione di chat
                                 replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName, ws.memories);
                                 
-                                // --- GESTIONE MEMORIZZAZIONE AUTOMATICA ---
                                 if (replyText.startsWith("MEMORIZZA:")) {
                                     let cleanReplyForUser = replyText.replace("MEMORIZZA:", "").trim();
                                     console.log(`[💾 Memoria Rilevata] ${cleanReplyForUser}`);
@@ -397,13 +386,12 @@ wss.on('connection', (ws, req) => {
 
                 if (!replyText || replyText.trim().length === 0) return;
 
-                // Invio audio risposta
                 ws.isSpeaking = true;
                 ws.send(JSON.stringify({ action: 'speak', text: replyText.trim() }));
                 sessionActiveUntil = Date.now() + 600000;
 
                 try {
-                    const textChunks = splitTextIntoChunks(replyText, 150);
+                    const textChunks = splitTextIntoChunks(replyText, 250);
 
                     for (let chunk of textChunks) {
                         if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
@@ -540,9 +528,10 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
+            // Filtri FFmpeg semplificati per evitare l'effetto robotico metallico
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
-                '-af', `volume=${volumeFactor},equalizer=f=300:width_type=o:width=2:g=2,acompressor=threshold=-20dB:ratio=2:attack=5:release=50`,
+                '-af', `volume=${volumeFactor}`,
                 '-f', 's16le',
                 '-acodec', 'pcm_s16le',
                 '-ac', '1',
