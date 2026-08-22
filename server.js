@@ -169,18 +169,19 @@ async function handleImageUpload(req, res) {
                         const pcmPart = await getSingleTtsPcm(chunk, activeWsClient.volume || 70);
 
                         if (pcmPart && pcmPart.length > 0) {
-                            const chunkSize = 4096;
+                            const chunkSize = 2048; // Ridotto a 2048 per l'ESP32
                             for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                 if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN) break;
 
-                                while (activeWsClient.bufferedAmount > 65536) {
-                                    await new Promise(resolve => setTimeout(resolve, 20));
+                                while (activeWsClient.bufferedAmount > 32768) {
+                                    await new Promise(resolve => setTimeout(resolve, 10));
                                 }
 
                                 activeWsClient.send(
                                     pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)),
                                     { binary: true }
                                 );
+                                await new Promise(resolve => setTimeout(resolve, 5));
                             }
                         }
                         await new Promise(resolve => setTimeout(resolve, 300));
@@ -397,15 +398,16 @@ wss.on('connection', (ws, req) => {
                         const pcmPart = await getSingleTtsPcm(chunk, ws.volume);
 
                         if (pcmPart && pcmPart.length > 0) {
-                            const chunkSize = 4096;
+                            const chunkSize = 2048; // Ridotto a 2048 per l'ESP32
                             for (let i = 0; i < pcmPart.length; i += chunkSize) {
                                 if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
 
-                                while (ws.bufferedAmount > 65536) {
-                                    await new Promise(resolve => setTimeout(resolve, 20));
+                                while (ws.bufferedAmount > 32768) {
+                                    await new Promise(resolve => setTimeout(resolve, 10));
                                 }
 
                                 ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
+                                await new Promise(resolve => setTimeout(resolve, 5));
                             }
                         }
                         await new Promise(resolve => setTimeout(resolve, 300));
@@ -493,7 +495,7 @@ function formatTimeForSpeech(text) {
     });
 }
 
-// --- EDGE TTS DIRECT HTTP IMPLEMENTATION (CORRETTA) ---
+// --- EDGE TTS DIRECT HTTP IMPLEMENTATION ---
 async function getSingleTtsPcm(textChunk, volumePercent = 70) {
     if (!textChunk || textChunk.trim().length === 0) return null;
 
