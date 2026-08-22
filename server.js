@@ -184,7 +184,7 @@ async function handleImageUpload(req, res) {
                                 );
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 150));
+                        await new Promise(resolve => setTimeout(resolve, 100));
                     }
 
                     if (activeWsClient && activeWsClient.isSpeaking && activeWsClient.readyState === activeWsClient.OPEN) {
@@ -194,7 +194,7 @@ async function handleImageUpload(req, res) {
                     activeWsClient.isSpeaking = false;
 
                 } catch (streamErr) {
-                    console.error('[❌ TTS Error]', streamErr.message);
+                    console.error('[❌ TTS Stream Error]', streamErr.message);
                     if (activeWsClient) activeWsClient.isSpeaking = false;
                 }
             }
@@ -392,6 +392,7 @@ wss.on('connection', (ws, req) => {
 
                 try {
                     const textChunks = splitTextIntoChunks(replyText, 180);
+                    console.log(`[📝 Chunks Chat] Diviso in ${textChunks.length} pezzi`);
 
                     for (let chunk of textChunks) {
                         if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
@@ -411,7 +412,7 @@ wss.on('connection', (ws, req) => {
                                 ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 150));
+                        await new Promise(resolve => setTimeout(resolve, 100));
                     }
 
                     if (ws.isSpeaking && ws.readyState === ws.OPEN) {
@@ -427,7 +428,7 @@ wss.on('connection', (ws, req) => {
                 }
             }
         } catch (e) {
-            // Silent fallback per messaggi non-JSON
+            console.error('[❌ WS Message Error]', e.message);
         }
     });
 
@@ -518,7 +519,7 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         });
 
         if (!response.ok) {
-            console.error(`[❌ TTS] Status ${response.status}`);
+            console.error(`[❌ TTS Fetch Error] Status ${response.status}`);
             return null;
         }
 
@@ -528,8 +529,8 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
-            // Filtro FFmpeg stabile e sicuro (senza compand instabile, usa il volume pulito)
-            const audioFilters = `volume=${volumeFactor}`;
+            // dynaudnorm normalizza il volume senza sbalzi | afade elimina i fruscii all'inizio/fine chunk
+            const audioFilters = `dynaudnorm=f=150:g=15,afade=t=in:st=0:d=0.005,volume=${volumeFactor}`;
 
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
@@ -551,10 +552,9 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
 
                 if (code === 0) {
                     let pcmBuffer = Buffer.concat(chunks);
-                    // Rimosse le imbottiture di silenzio e i fade sui singoli chunk per evitare fruscii
                     resolve(pcmBuffer);
                 } else {
-                    reject(new Error(`FFmpeg code ${code}`));
+                    reject(new Error(`FFmpeg exited with code ${code}`));
                 }
             });
 
@@ -572,7 +572,7 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
             ffmpeg.stdin.end();
         });
     } catch (err) {
-        console.error('[❌ TTS Error]', err.message);
+        console.error('[❌ TTS Processing Error]', err.message);
         return null;
     }
 }
