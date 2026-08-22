@@ -159,7 +159,7 @@ async function handleImageUpload(req, res) {
                 activeWsClient.send(JSON.stringify({ action: 'speak', text: resultText.trim() }));
 
                 try {
-                    const textChunks = splitTextIntoChunks(resultText, 180);
+                    const textChunks = splitTextIntoChunks(resultText, 250);
                     console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi`);
 
                     for (let chunk of textChunks) {
@@ -391,7 +391,7 @@ wss.on('connection', (ws, req) => {
                 sessionActiveUntil = Date.now() + 600000;
 
                 try {
-                    const textChunks = splitTextIntoChunks(replyText, 180);
+                    const textChunks = splitTextIntoChunks(replyText, 250);
 
                     for (let chunk of textChunks) {
                         if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
@@ -448,12 +448,11 @@ wss.on('connection', (ws, req) => {
 // --- UTILITY FUNCTIONS ---
 // =============================================
 
-function splitTextIntoChunks(text, maxLength = 180) {
+function splitTextIntoChunks(text, maxLength = 250) {
     if (!text || text.length === 0) return [];
     if (text.length <= maxLength) return [text];
 
-    // Spezza preferibilmente sui punti, punti e virgola o virgole per evitare blocchi troppo lunghi
-    const sentences = text.match(/[^.!?;:]+[.!?;:]+["']?|.+$/g) || [text];
+    const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
     let chunks = [];
     let currentChunk = "";
 
@@ -529,6 +528,7 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
+            // Filtri FFmpeg semplificati per evitare l'effetto robotico metallico
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
                 '-af', `volume=${volumeFactor}`,
@@ -656,9 +656,9 @@ RICORDI SALVATI SUL DISPOSITIVO DELL'UTENTE (da usare attivamente se interrogato
 ${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al momento."}
 
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
-- L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
-- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 23 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
-- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.`;
+- L'utente ha 55 anni e si chiama Alessandro, è un perito elettronico a Genova.
+- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
+- Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
@@ -680,28 +680,6 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
     }
     const data = await response.json();
     return data.choices[0].message.content || "Errore risposta.";
-}
-
-/**
- * Gestisce eventuali log di sistema o notifiche asincrone per i client connessi.
- */
-function broadcastStatus(statusMessage) {
-    if (activeWsClient && activeWsClient.readyState === activeWsClient.OPEN) {
-        activeWsClient.send(JSON.stringify({
-            action: 'status',
-            message: statusMessage,
-            timestamp: new Date().toISOString()
-        }));
-    }
-}
-
-/**
- * Validatore rapido per i comandi vocali in ingresso.
- */
-function validateVoiceCommand(transcript) {
-    if (!transcript) return false;
-    const clean = transcript.trim();
-    return clean.length > 1;
 }
 
 // =============================================
