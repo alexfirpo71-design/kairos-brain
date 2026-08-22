@@ -159,7 +159,7 @@ async function handleImageUpload(req, res) {
                 activeWsClient.send(JSON.stringify({ action: 'speak', text: resultText.trim() }));
 
                 try {
-                    const textChunks = splitTextIntoChunks(resultText, 250);
+                    const textChunks = splitTextIntoChunks(resultText, 180);
                     console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi`);
 
                     for (let chunk of textChunks) {
@@ -184,7 +184,7 @@ async function handleImageUpload(req, res) {
                                 );
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 150));
+                        await new Promise(resolve => setTimeout(resolve, 400));
                     }
 
                     if (activeWsClient && activeWsClient.isSpeaking && activeWsClient.readyState === activeWsClient.OPEN) {
@@ -391,7 +391,7 @@ wss.on('connection', (ws, req) => {
                 sessionActiveUntil = Date.now() + 600000;
 
                 try {
-                    const textChunks = splitTextIntoChunks(replyText, 250);
+                    const textChunks = splitTextIntoChunks(replyText, 180);
 
                     for (let chunk of textChunks) {
                         if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
@@ -411,7 +411,7 @@ wss.on('connection', (ws, req) => {
                                 ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 150));
+                        await new Promise(resolve => setTimeout(resolve, 400));
                     }
 
                     if (ws.isSpeaking && ws.readyState === ws.OPEN) {
@@ -448,11 +448,11 @@ wss.on('connection', (ws, req) => {
 // --- UTILITY FUNCTIONS ---
 // =============================================
 
-function splitTextIntoChunks(text, maxLength = 250) {
+function splitTextIntoChunks(text, maxLength = 180) {
     if (!text || text.length === 0) return [];
     if (text.length <= maxLength) return [text];
 
-    const sentences = text.match(/[^.!?]+[.!?]+["']?|.+$/g) || [text];
+    const sentences = text.match(/[^.!?;:]+[.!?;:]+["']?|.+$/g) || [text];
     let chunks = [];
     let currentChunk = "";
 
@@ -525,10 +525,15 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const arrayBuffer = await response.arrayBuffer();
         const mp3Buffer = Buffer.from(arrayBuffer);
 
+        const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
+
         return await new Promise((resolve, reject) => {
-            // FFmpeg pulito senza filtri di volume o fade manuali che distorcono l'audio
+            // Compressore dinamico integrato per normalizzare il volume ed evitare sbalzi
+            const audioFilters = `compand=attacks=0:points=-70/-70|-45/-20|0/-10:gain=5,volume=${volumeFactor}`;
+
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
+                '-af', audioFilters,
                 '-f', 's16le',
                 '-acodec', 'pcm_s16le',
                 '-ac', '1',
@@ -546,7 +551,27 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
 
                 if (code === 0) {
                     let pcmBuffer = Buffer.concat(chunks);
-                    resolve(pcmBuffer);
+
+                    const silenceSamples = 4000;
+                    let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
+
+                    const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
+                    for (let i = 0; i < fadeSamplesIn; i++) {
+                        const sample = paddedPcmBuffer.readInt16LE(i * 2);
+                        const multiplier = i / fadeSamplesIn;
+                        paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), i * 2);
+                    }
+
+                    const fadeSamplesOut = silenceSamples;
+                    const startOutIdx = (paddedPcmBuffer.length / 2) - fadeSamplesOut;
+                    for (let i = 0; i < fadeSamplesOut; i++) {
+                        const idx = (startOutIdx + i) * 2;
+                        const sample = paddedPcmBuffer.readInt16LE(idx);
+                        const multiplier = (fadeSamplesOut - i) / fadeSamplesOut;
+                        paddedPcmBuffer.writeInt16LE(Math.floor(sample * multiplier), idx);
+                    }
+
+                    resolve(paddedPcmBuffer);
                 } else {
                     reject(new Error(`FFmpeg code ${code}`));
                 }
@@ -633,9 +658,9 @@ RICORDI SALVATI SUL DISPOSITIVO DELL'UTENTE (da usare attivamente se interrogato
 ${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al momento."}
 
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
-- L'utente ha 55 anni e si chiama Alessandro, è un perito elettronico a Genova.
-- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, i gatti Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata l'11 maggio 2026.
-- Passioni tecniche: retrogaming, flight simulation, pilota di drone.`;
+- L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
+- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 23 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
+- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
