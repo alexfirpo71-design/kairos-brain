@@ -6,6 +6,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { MsEdgeTTS, Voices } from 'ms-edge-tts';
 
 // Definizione __dirname per ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -509,26 +510,20 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
 
         if (sanitizedText.length === 0) return null;
 
-        const cleanText = encodeURIComponent(sanitizedText);
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${cleanText}&tl=it&client=tw-ob`;
+        // --- EDGE TTS INTEGRATION ---
+        const tts = new MsEdgeTTS();
+        await tts.setMetadata("it-IT-DiegoNeural", Voices.Network);
+        const audioStream = tts.toStream(sanitizedText);
 
-        const response = await fetch(ttsUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-            timeout: 10000
-        });
-
-        if (!response.ok) {
-            console.error(`[❌ TTS] Status ${response.status}`);
-            return null;
+        const mp3Chunks = [];
+        for await (const chunk of audioStream) {
+            mp3Chunks.push(chunk);
         }
-
-        const arrayBuffer = await response.arrayBuffer();
-        const mp3Buffer = Buffer.from(arrayBuffer);
+        const mp3Buffer = Buffer.concat(mp3Chunks);
 
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
-            // Filtri FFmpeg semplificati per evitare l'effetto robotico metallico
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
                 '-af', `volume=${volumeFactor}`,
@@ -589,7 +584,7 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
             ffmpeg.stdin.end();
         });
     } catch (err) {
-        console.error('[❌ TTS Error]', err.message);
+        console.error('[❌ Edge TTS Error]', err.message);
         return null;
     }
 }
@@ -688,7 +683,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`\n╔════════════════════════════════════╗`);
-    console.log(`║  🚀 Kairós Brain Server            ║`);
+    console.log(`║  🚀 Kairós Brain Server (Edge)     ║`);
     console.log(`║  Port: ${PORT}                        ║`);
     console.log(`║  Status: ACTIVE                    ║`);
     console.log(`╚════════════════════════════════════╝\n`);
