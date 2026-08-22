@@ -1,15 +1,15 @@
 {
-  "name": "kairos-brain-server",
-  "version": "1.0.0",
-  "description": "Backend server per Kairós",
-  "main": "server.js",
-  "type": "module",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "form-data": "^4.0.0",
-    "node-fetch": "^2.6.7",
-    "ws": "^8.13.0"
-  }
+  "name": "kairos-gateway",
+  "version": "1.0.0",
+  "description": "Gateway WebSocket per Kairos",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "form-data": "^4.0.0",
+    "node-fetch": "^3.3.2",
+    "ws": "^8.18.0"
+  }
 }
