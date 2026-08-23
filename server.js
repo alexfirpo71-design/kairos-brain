@@ -102,7 +102,7 @@ async function handleImageUpload(req, res) {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    model: 'qwen/qwen3.6-27b',
+                    model: 'llama-3.2-11b-vision-preview', // Modello vision stabile su Groq
                     messages: [
                         {
                             role: 'system',
@@ -140,12 +140,6 @@ async function handleImageUpload(req, res) {
 
             // Pulizia risposta
             resultText = resultText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-            if (resultText.includes("4.")) {
-                const parts = resultText.split(/4\.\s*\*\*.*?\*\*:/i);
-                if (parts.length > 1) {
-                    resultText = parts[1].trim().replace(/^["']|["']$/g, '');
-                }
-            }
 
             console.log(`[✓ OCR Result] "${resultText.substring(0, 100)}..."`);
 
@@ -254,7 +248,7 @@ wss.on('connection', (ws, req) => {
     ws.on('message', async (message, isBinary) => {
         try {
             if (isBinary) {
-                if (ws.isSpeaking || ws.isProcessing) return; // Ignora pacchetti audio se occupato
+                if (ws.isSpeaking || ws.isProcessing) return;
                 audioBuffer.push(message);
                 return;
             }
@@ -292,7 +286,6 @@ wss.on('connection', (ws, req) => {
             }
 
             if (data.state === 'processing') {
-                // --- BLOCCO TOTALE ANTI-FLOOD (4 SECONDI DI COOLDOWN) ---
                 const nowTime = Date.now();
                 if (ws.isSpeaking || ws.isProcessing || (nowTime - lastRequestTime < 500)) {
                     console.log('[⚠️ Anti-Flood] Richiesta audio scartata: Kairós è occupato o in cooldown.');
@@ -446,13 +439,13 @@ wss.on('connection', (ws, req) => {
                         ws.send(JSON.stringify({ action: 'stop' }));
                     }
                     ws.isSpeaking = false;
-                    ws.isProcessing = false; // Sblocca nuove richieste solo alla fine dello streaming
+                    ws.isProcessing = false;
                     sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                 } catch (streamErr) {
                     console.error('[❌ Streaming Error]', streamErr.message);
                     ws.isSpeaking = false;
-                    ws.isProcessing = false; // Sblocca anche in caso di errore nello streaming
+                    ws.isProcessing = false;
                 }
             }
         } catch (e) {
@@ -700,7 +693,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'openai/gpt-oss-20b',
+            model: 'llama-3.3-70b-versatile', // Modello chat standard ottimizzato su Groq
             messages: messages,
             max_tokens: 4000,
             temperature: 0.7
