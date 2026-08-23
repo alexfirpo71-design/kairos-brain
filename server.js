@@ -294,7 +294,7 @@ wss.on('connection', (ws, req) => {
             if (data.state === 'processing') {
                 // --- BLOCCO TOTALE ANTI-FLOOD (4 SECONDI DI COOLDOWN) ---
                 const nowTime = Date.now();
-                if (ws.isSpeaking || ws.isProcessing || (nowTime - lastRequestTime < 4000)) {
+                if (ws.isSpeaking || ws.isProcessing || (nowTime - lastRequestTime < 2000)) {
                     console.log('[⚠️ Anti-Flood] Richiesta audio scartata: Kairós è occupato o in cooldown.');
                     audioBuffer = [];
                     return;
