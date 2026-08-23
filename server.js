@@ -658,6 +658,12 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro", dynamicMemories = "") {
     const apiKey = process.env.GROQ_API_KEY;
+    
+    if (!apiKey) {
+        console.error("[❌ GROQ ERROR] Manca la variabile d'ambiente GROQ_API_KEY!");
+        throw new Error("API Key di Groq non configurata sul server.");
+    }
+
     const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, deciso e solo quando viene richiesto.
 
@@ -675,44 +681,18 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
 - L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
 - Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
 - Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.
-- LIMITAZIONE VOCALE: Sii estremamente sintetico, diretto e conciso. Mantieni le risposte brevi (massimo 2-3 frasi) per evitare la saturazione del buffer audio sull'hardware.
-- GESTIONE VISIVA: Se l'utente chiede di "leggere" un biglietto o un testo, trascrivi solo il testo visibile. Se invece chiede "cosa vedi?", descrivi la persona o il paesaggio presente nell'immagine.`;
+- LIMITAZIONE VOCALE: Sii estremamente sintetico, diretto e conciso. Mantieni le risposte brevi (massimo 2-3 frasi) per evitare la saturazione del buffer audio sull'hardware.`;
 
-    // Prepariamo i messaggi inserendo il system prompt
     let messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
-
-    // Se l'ultima richiesta dell'utente menziona la vista/camera e l'immagine esiste, alleghiamola
-    const lastUserMsg = conversationHistory[conversationHistory.length - 1];
-    const isVisionQuery = lastUserMsg && /telecamera|guarda|inquadra|biglietto|vedi|viso|paesaggio/i.test(lastUserMsg.content);
-
-    if (isVisionQuery && fs.existsSync(FIXED_IMAGE_PATH)) {
-        try {
-            const imageBuffer = fs.readFileSync(FIXED_IMAGE_PATH);
-            if (imageBuffer && imageBuffer.length > 0) {
-                messages[messages.length - 1] = {
-                    role: 'user',
-                    content: [
-                        { type: 'text', text: lastUserMsg.content },
-                        { 
-                            type: 'image_url', 
-                            image_url: { 
-                                url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` 
-                            } 
-                        }
-                    ]
-                };
-                console.log('[🤖 Vision Chat] Immagine allegata alla conversazione IA.');
-            }
-        } catch (imgErr) {
-            console.error('[⚠️ Vision Error] Impossibile leggere immagine locale:', imgErr.message);
-        }
-    }
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: { 
+            'Authorization': `Bearer ${apiKey.trim()}`, 
+            'Content-Type': 'application/json' 
+        },
         body: JSON.stringify({
-            model: 'qwen/qwen2.5-vl-7b-instruct', // Modello multimodale supportato da Groq per la visione
+            model: 'mixtral-8x7b-32768', // Addio Llama, usiamo Mixtral
             messages: messages,
             max_tokens: 400,
             temperature: 0.7
@@ -721,11 +701,16 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
     });
 
     if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(`[❌ GROQ ERROR DEBUG] Status: ${response.status}, Body: ${errorBody}`);
         if (response.status === 429) throw new Error("Troppe richieste in corso. Attendi qualche secondo.");
-        throw new Error(`Errore Chat: ${response.status}`);
+        throw new Error(`Errore Chat: ${response.status} - ${errorBody}`);
     }
+
     const data = await response.json();
-    return data.choices[0].message.content || "Errore risposta.";
+    return data.choices && data.choices[0] && data.choices[0].message 
+        ? data.choices[0].message.content 
+        : "Errore nella risposta da Groq.";
 }
 
 // =============================================
