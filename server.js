@@ -677,7 +677,7 @@ async function transcribeAudio(audioBuffer) {
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro", dynamicMemories = "") {
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
-Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini e solo quando viene richiesto.
+Parli sempre in italiano in modo diretto, deciso e solo quando viene richiesto.
 
 ISTRUZIONE CRITICA SULLA MEMORIA LOCALE:
 Quando l'utente ti chiede esplicitamente di memorizzare, ricordare o salvare un fatto, un'informazione o una preferenza:
@@ -691,7 +691,7 @@ ${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al mome
 
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
 - L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
-- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 23 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
+- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
 - Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.`;
 
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
