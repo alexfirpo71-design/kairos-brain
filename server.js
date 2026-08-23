@@ -391,42 +391,51 @@ wss.on('connection', (ws, req) => {
                 sessionActiveUntil = Date.now() + 600000;
 
                 try {
-                    const textChunks = splitTextIntoChunks(replyText, 180);
+    const textChunks = splitTextIntoChunks(replyText, 180);
+    console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi. Generazione audio in corso...`);
 
-                    for (let chunk of textChunks) {
-                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+    // 1. Generiamo TUTTI i pezzi PCM in anticipo per evitare vuoti di trasmissione
+    let pcmQueue = [];
+    for (let chunk of textChunks) {
+        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+        const pcmPart = await getSingleTtsPcm(chunk, ws.volume);
+        if (pcmPart && pcmPart.length > 0) {
+            pcmQueue.push(pcmPart);
+        }
+    }
 
-                        sessionActiveUntil = Date.now() + 600000;
-                        const pcmPart = await getSingleTtsPcm(chunk, ws.volume);
+    console.log(`[🔊 Streaming] Invio di ${pcmQueue.length} blocchi audio all'ESP32...`);
 
-                        if (pcmPart && pcmPart.length > 0) {
-                            const chunkSize = 4096;
-                            for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+    // 2. Inviamo i blocchi in modo continuo e fluido senza pause morte
+    for (let pcmPart of pcmQueue) {
+        const chunkSize = 4096;
+        for (let i = 0; i < pcmPart.length; i += chunkSize) {
+            if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
 
-                                while (ws.bufferedAmount > 65536) {
-                                    await new Promise(resolve => setTimeout(resolve, 20));
-                                }
+            while (ws.bufferedAmount > 65536) {
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
 
-                                ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
-                            }
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 400));
-                    }
+            ws.send(
+                pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)),
+                { binary: true }
+            );
+        }
+    }
 
-                    if (ws.isSpeaking && ws.readyState === ws.OPEN) {
-                        console.log('[✓ Chat] Streaming completato');
-                        ws.send(JSON.stringify({ action: 'stop' }));
-                    }
-                    ws.isSpeaking = false;
-                    ws.isProcessing = false; // Sblocca nuove richieste solo alla fine dello streaming
-                    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
+    if (ws.isSpeaking && ws.readyState === ws.OPEN) {
+        console.log('[✓ Chat] Streaming completato');
+        ws.send(JSON.stringify({ action: 'stop' }));
+    }
+    ws.isSpeaking = false;
+    ws.isProcessing = false;
+    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
-                } catch (streamErr) {
-                    console.error('[❌ Streaming Error]', streamErr.message);
-                    ws.isSpeaking = false;
-                    ws.isProcessing = false; // Sblocca anche in caso di errore nello streaming
-                }
+} catch (streamErr) {
+    console.error('[❌ Streaming Error]', streamErr.message);
+    ws.isSpeaking = false;
+    ws.isProcessing = false;
+}
             }
         } catch (e) {
             ws.isProcessing = false;
