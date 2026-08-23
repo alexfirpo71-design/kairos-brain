@@ -658,12 +658,6 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro", dynamicMemories = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    
-    if (!apiKey) {
-        console.error("[❌ GROQ ERROR] Manca la variabile d'ambiente GROQ_API_KEY!");
-        throw new Error("API Key di Groq non configurata sul server.");
-    }
-
     const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
 Parli sempre in italiano in modo diretto, deciso e solo quando viene richiesto.
 
@@ -680,37 +674,28 @@ ${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al mome
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
 - L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
 - Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
-- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.
-- LIMITAZIONE VOCALE: Sii estremamente sintetico, diretto e conciso. Mantieni le risposte brevi (massimo 2-3 frasi) per evitare la saturazione del buffer audio sull'hardware.`;
+- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.`;
 
-    let messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
+    const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 
-            'Authorization': `Bearer ${apiKey.trim()}`, 
-            'Content-Type': 'application/json' 
-        },
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'mixtral-8x7b-32768', // Addio Llama, usiamo Mixtral
+            model: 'openai/gpt-oss-20b',
             messages: messages,
-            max_tokens: 400,
+            max_tokens: 4000,
             temperature: 0.7
         }),
         timeout: 30000
     });
 
     if (!response.ok) {
-        const errorBody = await response.text();
-        console.error(`[❌ GROQ ERROR DEBUG] Status: ${response.status}, Body: ${errorBody}`);
         if (response.status === 429) throw new Error("Troppe richieste in corso. Attendi qualche secondo.");
-        throw new Error(`Errore Chat: ${response.status} - ${errorBody}`);
+        throw new Error(`Errore Chat: ${response.status}`);
     }
-
     const data = await response.json();
-    return data.choices && data.choices[0] && data.choices[0].message 
-        ? data.choices[0].message.content 
-        : "Errore nella risposta da Groq.";
+    return data.choices[0].message.content || "Errore risposta.";
 }
 
 // =============================================
