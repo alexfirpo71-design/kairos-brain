@@ -674,18 +674,47 @@ ${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al mome
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
 - L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
 - Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
-- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.`;
+- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.
 - LIMITAZIONE VOCALE: Sii estremamente sintetico, diretto e conciso. Mantieni le risposte brevi (massimo 2-3 frasi) per evitare la saturazione del buffer audio sull'hardware.
-    - GESTIONE VISIVA / OCR: Se l'utente chiede di "leggere" qualcosa (es. "leggi biglietto", "leggi il testo"), concentrati esclusivamente sulla trascrizione esatta e pulita del testo rilevato, senza aggiungere descrizioni superflue. Se invece l'utente chiede "cosa vedi?", fornisci una descrizione dettagliata del paesaggio e degli elementi riconosciuti nell'immagine.
-    const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
+- GESTIONE VISIVA: Se l'utente chiede di "leggere" un biglietto o un testo, trascrivi solo il testo visibile. Se invece chiede "cosa vedi?", descrivi la persona o il paesaggio presente nell'immagine.`;
+
+    // Prepariamo i messaggi inserendo il system prompt
+    let messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
+
+    // Se l'ultima richiesta dell'utente menziona la vista/camera e l'immagine esiste, alleghiamola
+    const lastUserMsg = conversationHistory[conversationHistory.length - 1];
+    const isVisionQuery = lastUserMsg && /telecamera|guarda|inquadra|biglietto|vedi|viso|paesaggio/i.test(lastUserMsg.content);
+
+    if (isVisionQuery && fs.existsSync(FIXED_IMAGE_PATH)) {
+        try {
+            const imageBuffer = fs.readFileSync(FIXED_IMAGE_PATH);
+            if (imageBuffer && imageBuffer.length > 0) {
+                messages[messages.length - 1] = {
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: lastUserMsg.content },
+                        { 
+                            type: 'image_url', 
+                            image_url: { 
+                                url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` 
+                            } 
+                        }
+                    ]
+                };
+                console.log('[🤖 Vision Chat] Immagine allegata alla conversazione IA.');
+            }
+        } catch (imgErr) {
+            console.error('[⚠️ Vision Error] Impossibile leggere immagine locale:', imgErr.message);
+        }
+    }
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'openai/gpt-oss-20b',
+            model: 'qwen/qwen2.5-vl-7b-instruct', // Modello multimodale supportato da Groq per la visione
             messages: messages,
-            max_tokens: 4000,
+            max_tokens: 400,
             temperature: 0.7
         }),
         timeout: 30000
