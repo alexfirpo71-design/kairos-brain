@@ -692,9 +692,9 @@ ${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al mome
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
 - L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
 - Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 23 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
-- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.`;
+- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.
 - LIMITAZIONE VOCALE: Sii estremamente sintetico, diretto e conciso. Mantieni le risposte brevi (massimo 2-3 frasi) per evitare la saturazione del buffer audio sull'hardware.
-    - GESTIONE VISIVA / OCR: Se l'utente chiede di "leggere" qualcosa (es. "leggi biglietto", "leggi il testo"), concentrati esclusivamente sulla trascrizione esatta e pulita del testo rilevato, senza aggiungere descrizioni superflue. Se invece l'utente chiede "cosa vedi?", fornisci una descrizione dettagliata del paesaggio e degli elementi riconosciuti nell'immagine.
+    - GESTIONE VISIVA / OCR: Se l'utente chiede di "leggere" qualcosa (es. "leggi biglietto", "leggi il testo"), concentrati esclusivamente sulla trascrizione esatta e pulita del testo rilevato, senza aggiungere descrizioni superflue. Se invece l'utente chiede "cosa vedi?", fornisci una descrizione dettagliata del paesaggio e degli elementi riconosciuti nell'immagine.`;
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
