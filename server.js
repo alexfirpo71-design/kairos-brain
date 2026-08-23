@@ -160,16 +160,43 @@ async function handleImageUpload(req, res) {
 
                 try {
                     const textChunks = splitTextIntoChunks(resultText, 180);
-console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi`);
+                    console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi`);
 
-for (let chunk of textChunks) {
-    if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) {
-        break;
-    }
+                    for (let chunk of textChunks) {
+                        if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) {
+                            break;
+                        }
 
-    const pcmPart = await getSingleTtsPcm(chunk, activeWsClient.volume || 70);
-    // ... (tutto il vecchio ciclo con i setTimeout e i chunk)
-}
+                        const pcmPart = await getSingleTtsPcm(chunk, activeWsClient.volume || 70);
+
+                        if (pcmPart && pcmPart.length > 0) {
+                            const chunkSize = 4096;
+                            for (let i = 0; i < pcmPart.length; i += chunkSize) {
+                                if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN) break;
+
+                                while (activeWsClient.bufferedAmount > 65536) {
+                                    await new Promise(resolve => setTimeout(resolve, 20));
+                                }
+
+                                activeWsClient.send(
+                                    pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)),
+                                    { binary: true }
+                                );
+                            }
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 400));
+                    }
+
+                    if (activeWsClient && activeWsClient.isSpeaking && activeWsClient.readyState === activeWsClient.OPEN) {
+                        console.log('[✓ TTS] Streaming audio completato');
+                        activeWsClient.send(JSON.stringify({ action: 'stop' }));
+                    }
+                    activeWsClient.isSpeaking = false;
+
+                } catch (streamErr) {
+                    console.error('[❌ TTS Error]', streamErr.message);
+                    if (activeWsClient) activeWsClient.isSpeaking = false;
+                }
             }
 
         } catch (err) {
@@ -267,7 +294,7 @@ wss.on('connection', (ws, req) => {
             if (data.state === 'processing') {
                 // --- BLOCCO TOTALE ANTI-FLOOD (4 SECONDI DI COOLDOWN) ---
                 const nowTime = Date.now();
-                if (ws.isSpeaking || ws.isProcessing || (nowTime - lastRequestTime < 500)) {
+                if (ws.isSpeaking || ws.isProcessing || (nowTime - lastRequestTime < 2000)) {
                     console.log('[⚠️ Anti-Flood] Richiesta audio scartata: Kairós è occupato o in cooldown.');
                     audioBuffer = [];
                     return;
@@ -391,51 +418,42 @@ wss.on('connection', (ws, req) => {
                 sessionActiveUntil = Date.now() + 600000;
 
                 try {
-    const textChunks = splitTextIntoChunks(replyText, 180);
-    console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi. Generazione audio in corso...`);
+                    const textChunks = splitTextIntoChunks(replyText, 180);
 
-    // 1. Generiamo TUTTI i pezzi PCM in anticipo per evitare vuoti di trasmissione
-    let pcmQueue = [];
-    for (let chunk of textChunks) {
-        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
-        const pcmPart = await getSingleTtsPcm(chunk, ws.volume);
-        if (pcmPart && pcmPart.length > 0) {
-            pcmQueue.push(pcmPart);
-        }
-    }
+                    for (let chunk of textChunks) {
+                        if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
 
-    console.log(`[🔊 Streaming] Invio di ${pcmQueue.length} blocchi audio all'ESP32...`);
+                        sessionActiveUntil = Date.now() + 600000;
+                        const pcmPart = await getSingleTtsPcm(chunk, ws.volume);
 
-    // 2. Inviamo i blocchi in modo continuo e fluido senza pause morte
-    for (let pcmPart of pcmQueue) {
-        const chunkSize = 4096;
-        for (let i = 0; i < pcmPart.length; i += chunkSize) {
-            if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
+                        if (pcmPart && pcmPart.length > 0) {
+                            const chunkSize = 4096;
+                            for (let i = 0; i < pcmPart.length; i += chunkSize) {
+                                if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
 
-            while (ws.bufferedAmount > 65536) {
-                await new Promise(resolve => setTimeout(resolve, 10));
-            }
+                                while (ws.bufferedAmount > 65536) {
+                                    await new Promise(resolve => setTimeout(resolve, 20));
+                                }
 
-            ws.send(
-                pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)),
-                { binary: true }
-            );
-        }
-    }
+                                ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
+                            }
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 400));
+                    }
 
-    if (ws.isSpeaking && ws.readyState === ws.OPEN) {
-        console.log('[✓ Chat] Streaming completato');
-        ws.send(JSON.stringify({ action: 'stop' }));
-    }
-    ws.isSpeaking = false;
-    ws.isProcessing = false;
-    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
+                    if (ws.isSpeaking && ws.readyState === ws.OPEN) {
+                        console.log('[✓ Chat] Streaming completato');
+                        ws.send(JSON.stringify({ action: 'stop' }));
+                    }
+                    ws.isSpeaking = false;
+                    ws.isProcessing = false; // Sblocca nuove richieste solo alla fine dello streaming
+                    sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
-} catch (streamErr) {
-    console.error('[❌ Streaming Error]', streamErr.message);
-    ws.isSpeaking = false;
-    ws.isProcessing = false;
-}
+                } catch (streamErr) {
+                    console.error('[❌ Streaming Error]', streamErr.message);
+                    ws.isSpeaking = false;
+                    ws.isProcessing = false; // Sblocca anche in caso di errore nello streaming
+                }
             }
         } catch (e) {
             ws.isProcessing = false;
@@ -543,7 +561,7 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
-            const audioFilters = `compand=attacks=0:points=-70/-70|-45/-20|0/-10:gain=5,volume=${volumeFactor},atempo=1.2`;
+            const audioFilters = `compand=attacks=0:points=-70/-70|-45/-20|0/-10:gain=5,volume=${volumeFactor}`;
 
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
@@ -659,7 +677,7 @@ async function transcribeAudio(audioBuffer) {
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro", dynamicMemories = "") {
     const apiKey = process.env.GROQ_API_KEY;
     const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
-Parli sempre in italiano in modo diretto, deciso e solo quando viene richiesto.
+Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini e solo quando viene richiesto.
 
 ISTRUZIONE CRITICA SULLA MEMORIA LOCALE:
 Quando l'utente ti chiede esplicitamente di memorizzare, ricordare o salvare un fatto, un'informazione o una preferenza:
@@ -673,10 +691,9 @@ ${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al mome
 
 CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
 - L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
-- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 24 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
+- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 23 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
 - Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.`;
-- LIMITAZIONE VOCALE: Sii estremamente sintetico, diretto e conciso. Mantieni le risposte brevi (massimo 2-3 frasi) per evitare la saturazione del buffer audio sull'hardware.
-    - GESTIONE VISIVA / OCR: Se l'utente chiede di "leggere" qualcosa (es. "leggi biglietto", "leggi il testo"), concentrati esclusivamente sulla trascrizione esatta e pulita del testo rilevato, senza aggiungere descrizioni superflue. Se invece l'utente chiede "cosa vedi?", fornisci una descrizione dettagliata del paesaggio e degli elementi riconosciuti nell'immagine.
+
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
