@@ -160,43 +160,16 @@ async function handleImageUpload(req, res) {
 
                 try {
                     const textChunks = splitTextIntoChunks(resultText, 180);
-                    console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi`);
+console.log(`[📝 Chunks] Diviso in ${textChunks.length} pezzi`);
 
-                    for (let chunk of textChunks) {
-                        if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) {
-                            break;
-                        }
+for (let chunk of textChunks) {
+    if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN || !activeWsClient.isSpeaking) {
+        break;
+    }
 
-                        const pcmPart = await getSingleTtsPcm(chunk, activeWsClient.volume || 70);
-
-                        if (pcmPart && pcmPart.length > 0) {
-                            const chunkSize = 4096;
-                            for (let i = 0; i < pcmPart.length; i += chunkSize) {
-                                if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN) break;
-
-                                while (activeWsClient.bufferedAmount > 65536) {
-                                    await new Promise(resolve => setTimeout(resolve, 20));
-                                }
-
-                                activeWsClient.send(
-                                    pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)),
-                                    { binary: true }
-                                );
-                            }
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 400));
-                    }
-
-                    if (activeWsClient && activeWsClient.isSpeaking && activeWsClient.readyState === activeWsClient.OPEN) {
-                        console.log('[✓ TTS] Streaming audio completato');
-                        activeWsClient.send(JSON.stringify({ action: 'stop' }));
-                    }
-                    activeWsClient.isSpeaking = false;
-
-                } catch (streamErr) {
-                    console.error('[❌ TTS Error]', streamErr.message);
-                    if (activeWsClient) activeWsClient.isSpeaking = false;
-                }
+    const pcmPart = await getSingleTtsPcm(chunk, activeWsClient.volume || 70);
+    // ... (tutto il vecchio ciclo con i setTimeout e i chunk)
+}
             }
 
         } catch (err) {
