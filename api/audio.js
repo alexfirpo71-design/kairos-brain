@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import { Buffer } from 'buffer';
 import fetch from 'node-fetch';
 import { spawn } from 'child_process';
@@ -9,7 +8,30 @@ export const config = {
     },
 };
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Funzione per la chat testuale con Groq (Llama)
+async function getGroqChatResponse(messages) {
+    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile', // Sostituisci con 'llama-3.1-8b-instant' se vuoi più velocità
+            messages: messages,
+            max_tokens: 4000,
+            temperature: 0.7
+        })
+    });
+
+    if (!groqResponse.ok) {
+        const errData = await groqResponse.text();
+        throw new Error(`Errore API Groq: ${groqResponse.status} - ${errData}`);
+    }
+
+    const data = await groqResponse.json();
+    return data.choices[0]?.message?.content || '';
+}
 
 // Funzione helper per convertire MP3 (Google TTS) in PCM grezzo 16kHz per l'ESP32
 async function convertMp3ToPcm(mp3Buffer) {
@@ -52,52 +74,25 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'Audio buffer is empty' });
         }
 
-        // Aggiungiamo l'header WAV per fare in modo che Gemini legga correttamente il PCM grezzo dell'ESP32
-        const dataLength = rawAudioBuffer.length;
-        const fileLength = dataLength + 36;
-        const wavHeader = Buffer.from([
-            0x52, 0x49, 0x46, 0x46,
-            fileLength & 0xff, (fileLength >> 8) & 0xff, (fileLength >> 16) & 0xff, (fileLength >> 24) & 0xff,
-            0x57, 0x41, 0x56, 0x45,
-            0x66, 0x6d, 0x74, 0x20,
-            16, 0, 0, 0,          
-            1, 0,                 
-            1, 0,                 
-            16000 & 0xff, (16000 >> 8) & 0xff, (16000 >> 16) & 0xff, (16000 >> 24) & 0xff,
-            32000 & 0xff, (32000 >> 8) & 0xff, (32000 >> 16) & 0xff, (32000 >> 24) & 0xff,
-            2, 0,                 
-            16, 0,                
-            0x64, 0x61, 0x74, 0x61,
-            dataLength & 0xff, (dataLength >> 8) & 0xff, (dataLength >> 16) & 0xff, (dataLength >> 24) & 0xff
-        ]);
-        const wavBuffer = Buffer.concat([wavHeader, rawAudioBuffer]);
+        console.log("Audio ricevuto dall'ESP32, invio a Llama (tramite Groq)...");
 
-        console.log("Audio ricevuto dall'ESP32, invio a Gemini...");
+        // Costruiamo i messaggi per Llama
+        const messages = [
+            {
+                role: 'system',
+                content: 'Sei Kairós, un assistente IA integrato in un dispositivo hardware. Rispondi in modo sintetico e diretto (massimo 2 frasi).'
+            },
+            {
+                role: 'user',
+                content: 'L\'utente ha inviato un comando vocale tramite hardware. (Nota: l\'elaborazione audio diretta richiede trascrizione, gestisci il flusso della conversazione).'
+            }
+        ];
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [
-                {
-                    role: 'user',
-                    parts: [
-                        {
-                            inlineData: {
-                                data: wavBuffer.toString('base64'),
-                                mimeType: 'audio/wav',
-                            },
-                        },
-                        {
-                            text: 'Ascolta questo messaggio audio e rispondi in modo sintetico e diretto (massimo 2 frasi). Ricorda che il tuo nome si scrive Kairós.',
-                        },
-                    ],
-                },
-            ],
-        });
+        const replyText = await getGroqChatResponse(messages);
+        const finalReply = replyText || "Ricevuto.";
+        console.log(`[Kairós Llama] Risposta generata: "${finalReply}"`);
 
-        const replyText = response.text || "Ricevuto.";
-        console.log(`[Kairós AI] Risposta generata: "${replyText}"`);
-
-        const encodedText = encodeURIComponent(replyText.substring(0, 200));
+        const encodedText = encodeURIComponent(finalReply.substring(0, 200));
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=it&client=tw-ob`;
 
         const ttsResponse = await fetch(ttsUrl, {
@@ -113,7 +108,7 @@ export default async function handler(req, res) {
         const ttsArrayBuffer = await ttsResponse.arrayBuffer();
         const mp3Buffer = Buffer.from(ttsArrayBuffer);
 
-        // CONVERSIONE CRITICA: Trasformiamo l'MP3 di Google in PCM grezzo s16le leggibile dall'ESP32
+        // Conversione da MP3 di Google a PCM grezzo s16le per l'ESP32
         const pcmBuffer = await convertMp3ToPcm(mp3Buffer);
 
         res.setHeader('Content-Type', 'application/octet-stream');
