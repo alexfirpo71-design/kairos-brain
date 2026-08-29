@@ -1,9 +1,38 @@
-import { GoogleGenAI } from '@google/genai';
+import { Buffer } from 'buffer';
+import fetch from 'node-fetch';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+export const config = {
+    api: {
+        bodyParser: true,
+    },
+};
+
+// Funzione per la chat testuale con Groq (Llama)
+async function getGroqChatResponse(messages) {
+    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile', // Sostituisci con 'llama-3.1-8b-instant' se vuoi più velocità
+            messages: messages,
+            max_tokens: 4000,
+            temperature: 0.7
+        })
+    });
+
+    if (!groqResponse.ok) {
+        const errData = await groqResponse.text();
+        throw new Error(`Errore API Groq: ${groqResponse.status} - ${errData}`);
+    }
+
+    const data = await groqResponse.json();
+    return data.choices[0]?.message?.content || '';
+}
 
 export default async function handler(req, res) {
-    // Gestione CORS opzionale o controllo metodo
     if (req.method !== 'POST') {
         return res.status(200).json({ status: "Kairós Chat API Online" });
     }
@@ -22,29 +51,25 @@ export default async function handler(req, res) {
 Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini. 
 Ricordi i messaggi precedenti e il profilo dell'utente (perito elettronico, appassionato di retrogaming, flight simulation e cucina tecnica).`;
 
-        // Configurazione della sessione di chat con la cronologia e l'istruzione di sistema
-        const chat = ai.chats.create({
-            model: 'gemini-2.5-flash',
-            config: {
-                systemInstruction: systemInstruction,
-                temperature: 0.7,
-                maxOutputTokens: 4000,
-            },
-            history: history.map(h => ({
-                role: h.role, // 'user' o 'model'
-                parts: [{ text: h.content }]
-            }))
-        });
+        // Mappa la cronologia nel formato standard OpenAI/Groq (system, user, assistant)
+        const formattedMessages = [
+            { role: 'system', content: systemInstruction },
+            ...history.map(h => ({
+                role: h.role === 'model' ? 'assistant' : h.role, // Adatta 'model' in 'assistant' per Groq
+                content: h.content
+            })),
+            { role: 'user', content: message }
+        ];
 
-        // Invio del messaggio al modello
-        const result = await chat.sendMessage({ message });
-        const replyText = result.text || "Ricevuto.";
+        // Invio dei messaggi a Llama tramite Groq
+        const replyText = await getGroqChatResponse(formattedMessages);
+        const finalReply = replyText || "Ricevuto.";
 
-        console.log(`[Kairós Chat] Risposta generata: "${replyText}"`);
+        console.log(`[Kairós Chat] Risposta generata: "${finalReply}"`);
 
         return res.status(200).json({ 
             status: "success",
-            reply: replyText 
+            reply: finalReply 
         });
 
     } catch (error) {
