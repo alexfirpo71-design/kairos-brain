@@ -102,7 +102,7 @@ async function handleImageUpload(req, res) {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    model: 'llama-3.2-11b-vision-preview',
+                    model: 'meta-llama/llama-3.2-11b-vision-instruct',
                     messages: [
                         {
                             role: 'system',
