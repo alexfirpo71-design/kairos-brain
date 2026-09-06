@@ -84,7 +84,7 @@ async function handleImageUpload(req, res) {
                 return;
             }
 
-            // --- VISION API CALL AGGIORNATA ---
+            // --- VISION API CALL ---
             const visionResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -92,7 +92,7 @@ async function handleImageUpload(req, res) {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    model: 'openai/gpt-oss-20b', // Sostituito con modello standard supportato
+                    model: 'openai/gpt-oss-20b',
                     messages: [
                         {
                             role: 'system',
@@ -266,6 +266,11 @@ wss.on('connection', (ws, req) => {
                         } else if (/abbassa|piu basso|volume giu/.test(rawText)) {
                             ws.volume = Math.max(10, ws.volume - 15);
                             replyText = `Volume al ${ws.volume} per cento.`;
+                        } else if (/telecamera|guarda|inquadra|biglietto/.test(rawText)) {
+                            ws.send(JSON.stringify({ action: 'trigger_camera', text: 'Scatto...' }));
+                            replyText = "Un attimo, guardo subito.";
+                            ws.conversationHistory.push({ role: 'user', content: transcript });
+                            ws.conversationHistory.push({ role: 'assistant', content: replyText });
                         } else {
                             ws.conversationHistory.push({ role: 'user', content: transcript });
                             replyText = await getGroqChatResponse(ws.conversationHistory, ws.userName, ws.memories);
@@ -284,7 +289,7 @@ wss.on('connection', (ws, req) => {
                     }
                 } catch (err) {
                     console.error('[❌ AI Error Completo]:', err);
-                    replyText = `Errore di connessione con l'intelligenza artificiale.`;
+                    replyText = `Si è verificato un errore di connessione con l'intelligenza artificiale.`;
                 }
 
                 if (!replyText) {
@@ -358,9 +363,13 @@ function splitTextIntoChunks(text, maxLength = 180) {
 }
 
 function formatTimeForSpeech(text) {
-    return text.replace(/\b([0-2]?[0-9])[:\.]([0-5][0-9])\b/g, (match, h, m) => {
-        let hourText = h === '1' ? "l'una" : `le ${h}`;
-        if (m === '00') return `${hourText} in punto`;
+    return text.replace(/\b([0-2]?[0-9])[:\.]([0-5][0-9])\b/g, (match, hours, minutes) => {
+        const h = parseInt(hours, 10);
+        const m = parseInt(minutes, 10);
+        let hourText = h === 1 ? "l'una" : `le ${h}`;
+        if (h === 0) hourText = "le ore zero";
+        if (m === 0) return `${hourText} in punto`;
+        if (m < 10) return `${hourText} e zero ${m}`;
         return `${hourText} e ${m}`;
     });
 }
@@ -368,7 +377,9 @@ function formatTimeForSpeech(text) {
 async function getSingleTtsPcm(textChunk, volumePercent = 70) {
     if (!textChunk) return null;
     try {
-        const sanitizedText = formatTimeForSpeech(textChunk).replace(/[*#_`~[\]()>]/g, '').trim();
+        const timeFormatted = formatTimeForSpeech(textChunk);
+        const speechFriendlyText = timeFormatted.replace(/Kairós|Kairos|Kairòs/gi, 'Cairos');
+        const sanitizedText = speechFriendlyText.replace(/[*#_`~[\]()>]/g, '').trim();
         const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(sanitizedText)}&tl=it&client=tw-ob`;
 
         const response = await fetch(ttsUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 });
@@ -439,14 +450,32 @@ async function transcribeAudio(audioBuffer) {
 
 async function getGroqChatResponse(conversationHistory, userName = "Alessandro", dynamicMemories = "") {
     const apiKey = process.env.GROQ_API_KEY;
-    const systemPrompt = `Kairós, l'assistente IA di ${userName}. Parla in italiano in modo sintetico, diretto e conciso (massimo 2-3 frasi).`;
+    const systemPrompt = `Kairós, l'assistente IA avanzato di ${userName}. 
+Parli sempre in italiano in modo diretto, deciso ma senza eccessive lungaggini e solo quando viene richiesto.
+
+ISTRUZIONE CRITICA SULLA MEMORIA LOCALE:
+Quando l'utente ti chiede esplicitamente di memorizzare, ricordare o salvare un fatto, un'informazione o una preferenza:
+- DEVI iniziare la risposta ESATTAMENTE con le lettere MAIUSCOLE "MEMORIZZA: " seguite dal dato da ricordare.
+- Subito dopo il comando, scrivi la frase di conferma che pronuncerai all'utente.
+Se non ti viene chiesto di memorizzare nulla, rispondi normalmente SENZA usare quel prefisso.
+
+RICORDI SALVATI SUL DISPOSITIVO DELL'UTENTE (da usare attivamente se interrogato):
+${dynamicMemories ? dynamicMemories : "Nessun ricordo aggiuntivo salvato al momento."}
+
+CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in merito):
+- L'utente ha 55 anni e si chiama Alessandro, è un tecnico elettronico a Genova.
+- Famiglia e affetti: la figlia Margot, la fidanzata Tiziana, papà Lino, mamma Elviana mancata il 23 dicembre 2024, il gatto Lulù, il coniglio Isalide, il cane Miele, e la gatta Prugna mancata a maggio 2026.
+- Passioni tecniche: riparazione console vintage, simulazione di volo, pilota di droni.
+- LIMITAZIONE VOCALE: Sii estremamente sintetico, diretto e conciso. Mantieni le risposte brevi (massimo 2-3 frasi) per evitare la saturazione del buffer audio sull'hardware.
+- GESTIONE VISIVA / OCR: Se l'utente chiede di leggere qualcosa, concentrati esclusivamente sulla trascrizione esatta e pulita del testo rilevato.`;
+
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: 'openai/gpt-oss-20b', // Modello standard stabile su Groq
+            model: 'openai/gpt-oss-20b',
             messages: messages,
             max_tokens: 1024,
             temperature: 0.7
