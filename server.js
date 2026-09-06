@@ -393,13 +393,9 @@ sessionActiveUntil = now + SESSION_DURATION_MS;
                         return;
                     }
                 } catch (err) {
-                    console.error('[❌ AI Error]', err.message);
-                    if (err.message.includes("429")) {
-                        replyText = "Il sistema è momentaneamente sovraccarico, attendi un secondo.";
-                    } else {
-                        replyText = "Si è verificato un errore.";
-                    }
-                }
+    console.error('[❌ AI Error Completo]:', err);
+    replyText = `Errore: ${err.message}`;
+}
 
                 if (!replyText || replyText.trim().length === 0) {
                     ws.isProcessing = false;
