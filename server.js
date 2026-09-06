@@ -687,7 +687,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
     - GESTIONE VISIVA / OCR: Se l'utente chiede di "leggere" qualcosa (es. "leggi biglietto", "leggi il testo"), concentrati esclusivamente sulla trascrizione esatta e pulita del testo rilevato, senza aggiungere descrizioni superflue. Se invece l'utente chiede "cosa vedi?", fornisci una descrizione dettagliata del paesaggio e degli elementi riconosciuti nell'immagine.`;
     const messages = [{ role: 'system', content: systemPrompt }, ...conversationHistory];
 
-    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
