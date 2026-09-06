@@ -324,14 +324,7 @@ wss.on('connection', (ws, req) => {
                             .trim();
 
                         const now = Date.now();
-                        const isSessionActive = now < sessionActiveUntil;
-                        const hasWakeWord = /kairos|cairos|cairo|ehi/.test(rawText);
-
-                        if (!isSessionActive && !hasWakeWord) {
-                            console.log('[🔇 VAD] Comando ignorato');
-                            ws.isProcessing = false;
-                            return;
-                        }
+sessionActiveUntil = now + SESSION_DURATION_MS;
 
                         sessionActiveUntil = now + SESSION_DURATION_MS;
 
