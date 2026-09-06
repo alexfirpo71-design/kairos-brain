@@ -175,7 +175,7 @@ async function handleImageUpload(req, res) {
                                 if (!activeWsClient || activeWsClient.readyState !== activeWsClient.OPEN) break;
 
                                 while (activeWsClient.bufferedAmount > 65536) {
-                                    await new Promise(resolve => setTimeout(resolve, 20));
+                                    await new Promise(resolve => setTimeout(resolve, 10));
                                 }
 
                                 activeWsClient.send(
@@ -184,7 +184,7 @@ async function handleImageUpload(req, res) {
                                 );
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 400));
+                        await new Promise(resolve => setTimeout(resolve, 200));
                     }
 
                     if (activeWsClient && activeWsClient.isSpeaking && activeWsClient.readyState === activeWsClient.OPEN) {
@@ -292,9 +292,9 @@ wss.on('connection', (ws, req) => {
             }
 
             if (data.state === 'processing') {
-                // --- BLOCCO TOTALE ANTI-FLOOD (4 SECONDI DI COOLDOWN) ---
+                // --- COOLDOWN RIDOTTO A 600MS PER MASSIMA REATTIVITÀ ---
                 const nowTime = Date.now();
-                if (ws.isSpeaking || ws.isProcessing || (nowTime - lastRequestTime < 2000)) {
+                if (ws.isSpeaking || ws.isProcessing || (nowTime - lastRequestTime < 600)) {
                     console.log('[⚠️ Anti-Flood] Richiesta audio scartata: Kairós è occupato o in cooldown.');
                     audioBuffer = [];
                     return;
@@ -432,13 +432,13 @@ wss.on('connection', (ws, req) => {
                                 if (ws.readyState !== ws.OPEN || !ws.isSpeaking) break;
 
                                 while (ws.bufferedAmount > 65536) {
-                                    await new Promise(resolve => setTimeout(resolve, 20));
+                                    await new Promise(resolve => setTimeout(resolve, 10));
                                 }
 
                                 ws.send(pcmPart.subarray(i, i + Math.min(chunkSize, pcmPart.length - i)), { binary: true });
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 400));
+                        await new Promise(resolve => setTimeout(resolve, 200));
                     }
 
                     if (ws.isSpeaking && ws.readyState === ws.OPEN) {
@@ -446,13 +446,13 @@ wss.on('connection', (ws, req) => {
                         ws.send(JSON.stringify({ action: 'stop' }));
                     }
                     ws.isSpeaking = false;
-                    ws.isProcessing = false; // Sblocca nuove richieste solo alla fine dello streaming
+                    ws.isProcessing = false; 
                     sessionActiveUntil = Date.now() + SESSION_DURATION_MS;
 
                 } catch (streamErr) {
                     console.error('[❌ Streaming Error]', streamErr.message);
                     ws.isSpeaking = false;
-                    ws.isProcessing = false; // Sblocca anche in caso di errore nello streaming
+                    ws.isProcessing = false; 
                 }
             }
         } catch (e) {
@@ -561,7 +561,8 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
         const volumeFactor = Math.max(0.1, Math.min(2, volumePercent / 70));
 
         return await new Promise((resolve, reject) => {
-            const audioFilters = `compand=attacks=0:points=-70/-70|-45/-20|0/-10:gain=5,volume=${volumeFactor},atempo=1.1`;
+            // --- FILTRI FFMEPEG OTTIMIZZATI: meno metallici, voce più naturale e fluida ---
+            const audioFilters = `volume=${volumeFactor},atempo=1.03`;
 
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',
@@ -584,10 +585,10 @@ async function getSingleTtsPcm(textChunk, volumePercent = 70) {
                 if (code === 0) {
                     let pcmBuffer = Buffer.concat(chunks);
 
-                    const silenceSamples = 4000;
+                    const silenceSamples = 2000;
                     let paddedPcmBuffer = Buffer.concat([pcmBuffer, Buffer.alloc(silenceSamples * 2)]);
 
-                    const fadeSamplesIn = Math.min(120, paddedPcmBuffer.length / 2);
+                    const fadeSamplesIn = Math.min(60, paddedPcmBuffer.length / 2);
                     for (let i = 0; i < fadeSamplesIn; i++) {
                         const sample = paddedPcmBuffer.readInt16LE(i * 2);
                         const multiplier = i / fadeSamplesIn;
@@ -710,7 +711,7 @@ CONTESTO PRIVATO (da usare ESCLUSIVAMENTE se l'utente ti fa domande dirette in m
     });
 
     if (!response.ok) {
-        if (response.status === 429) throw new Error("Troppe richieste in corso. Attendi qualche secondo.");
+        if (response.status === 429) throw new Error("Troppe richieste in corso. Attend qualche secondo.");
         throw new Error(`Errore Chat: ${response.status}`);
     }
     const data = await response.json();
@@ -724,7 +725,7 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`\n╔════════════════════════════════════╗`);
     console.log(`║  🚀 Kairós Brain Server            ║`);
-    console.log(`║  Port: ${PORT}                        ║`);
+    console.log(`║  Port: ${PORT}                      ║`);
     console.log(`║  Status: ACTIVE                    ║`);
     console.log(`╚════════════════════════════════════╝\n`);
 });
